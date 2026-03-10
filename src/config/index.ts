@@ -3,12 +3,6 @@
  * 统一管理所有配置项，避免硬编码
  */
 
-// ========== 类型定义 ==========
-
-export type JWTConfig = typeof JWT_CONFIG;
-export type RateLimitConfig = typeof RATE_LIMIT_CONFIG;
-export type TMDBConfig = typeof TMDB_CONFIG;
-
 // ========== 配置常量 ==========
 
 // JWT 配置

@@ -6,6 +6,7 @@ import VideoPlayer from "@/components/player/VideoPlayerWrapper";
 import PageLayout from "@/components/layout/PageLayout";
 import { normalizeJsonArray } from "@/lib/utils";
 import { useEffect, useState } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import FavoriteButton from "@/components/ui/FavoriteButton";
 
 interface PlayData {
@@ -66,11 +67,11 @@ export default function PlayPage({ params }: { params: Promise<{ seriesId: strin
                         </div>
 
                         {/* 播放器下方信息区便当盒 */}
-                        <div className="bento-card p-8 flex flex-col md:flex-row justify-between items-start gap-8">
-                            <div className="space-y-6 flex-grow">
+                        <div className="bento-card p-8 flex flex-col lg:flex-row justify-between items-start gap-12">
+                            <div className="space-y-8 flex-grow">
                                 <div className="space-y-4">
                                     <div className="flex items-center gap-4">
-                                        <h1 className="text-3xl font-black text-white tracking-tighter drop-shadow-md">
+                                        <h1 className="text-4xl font-black text-white tracking-tighter drop-shadow-md">
                                             {series.title}
                                         </h1>
                                         <span className="px-3 py-1 bg-blue-500/20 text-blue-400 font-black text-sm rounded-lg border border-blue-500/30">
@@ -86,26 +87,72 @@ export default function PlayPage({ params }: { params: Promise<{ seriesId: strin
                                     </div>
                                 </div>
 
-                                <div className="relative group">
-                                    <p className={`max-w-3xl text-slate-300 text-[15px] font-medium leading-relaxed transition-all duration-300 ${!isExpanded && isLongDescription ? "line-clamp-3" : ""}`}>
-                                        {series.overview}
-                                    </p>
+                                <div className="relative">
+                                    <motion.div
+                                        initial={false}
+                                        animate={{ height: isExpanded ? "auto" : "110px" }}
+                                        className="relative overflow-hidden group"
+                                    >
+                                        <p className="max-w-4xl text-slate-300/90 text-[16px] font-medium leading-[1.8] tracking-wide text-justify break-all">
+                                            {series.overview}
+                                        </p>
+
+                                        {/* 渐变遮罩 - 仅在折叠且内容长时显示 */}
+                                        <AnimatePresence>
+                                            {!isExpanded && isLongDescription && (
+                                                <motion.div
+                                                    initial={{ opacity: 0 }}
+                                                    animate={{ opacity: 1 }}
+                                                    exit={{ opacity: 0 }}
+                                                    className="absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-[#0f111a] to-transparent pointer-events-none"
+                                                />
+                                            )}
+                                        </AnimatePresence>
+                                    </motion.div>
+
                                     {isLongDescription && (
                                         <button
                                             onClick={() => setIsExpanded(!isExpanded)}
-                                            className="mt-2 text-xs font-black text-blue-500 uppercase tracking-widest hover:text-blue-400 transition-colors flex items-center gap-1"
+                                            className="mt-4 px-0 py-2 rounded-xl bg-transparent border border-transparent text-[10px] font-black text-blue-500 uppercase tracking-[0.2em] hover:text-blue-400 transition-all flex items-center gap-2 group/btn"
                                         >
                                             {isExpanded ? (
-                                                <>收起简介 <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 15l7-7 7 7" /></svg></>
+                                                <>收起简介 <svg className="w-3 h-3 transform group-hover:-translate-y-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 15l7-7 7 7" /></svg></>
                                             ) : (
-                                                <>展开全文 <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M19 9l-7 7-7-7" /></svg></>
+                                                <>展开全文 <svg className="w-3 h-3 transform group-hover:translate-y-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M19 9l-7 7-7-7" /></svg></>
                                             )}
                                         </button>
                                     )}
                                 </div>
                             </div>
-                            <div className="shrink-0 mt-2 flex items-center gap-4">
-                                <FavoriteButton seriesId={series.id} />
+
+                            {/* 右侧元数据速览区 */}
+                            <div className="shrink-0 flex flex-col gap-8 min-w-[240px] pt-2">
+                                <div className="flex items-center justify-between gap-4">
+                                    <FavoriteButton seriesId={series.id} />
+                                    {series.voteAverage && (
+                                        <div className="flex items-center gap-2 px-4 py-2 rounded-2xl aura-glass bg-blue-600/10 border border-blue-500/20">
+                                            <span className="text-[10px] font-black italic text-blue-400">TMDb</span>
+                                            <span className="text-lg font-black text-white">{series.voteAverage.toFixed(1)}</span>
+                                        </div>
+                                    )}
+                                </div>
+
+                                <div className="space-y-6 pt-8 border-t border-white/5">
+                                    <div className="grid grid-cols-[70px_1fr] items-baseline gap-6 group/meta">
+                                        <span className="text-[13px] font-black text-slate-200 tracking-widest shrink-0">上映年份</span>
+                                        <p className="text-[13px] font-bold text-slate-200 leading-normal">{series.year || "未知"}</p>
+                                    </div>
+                                    <div className="grid grid-cols-[70px_1fr] items-baseline gap-6 group/meta">
+                                        <span className="text-[12px] font-black text-slate-200 tracking-widest shrink-0">主演阵容</span>
+                                        <div className="flex flex-wrap gap-x-2 gap-y-1 text-[12px] font-bold text-slate-200 leading-normal">
+                                            {normalizeJsonArray(series.cast).slice(0, 3).map((c: string, idx: number, arr: any[]) => (
+                                                <span key={idx}>
+                                                    {c}{idx < arr.length - 1 ? "、" : ""}
+                                                </span>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>

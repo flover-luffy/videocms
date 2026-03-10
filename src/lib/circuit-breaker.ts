@@ -3,7 +3,7 @@
  * 用于保护外部服务调用，防止级联故障
  */
 
-export interface CircuitBreakerOptions {
+interface CircuitBreakerOptions {
     /** 失败阈值，超过此值后熔断器打开 */
     failureThreshold: number;
     /** 成功阈值，达到此值后熔断器关闭 */
@@ -30,7 +30,7 @@ class CircuitBreakerError extends Error {
 /**
  * 熔断器类
  */
-export class CircuitBreaker {
+class CircuitBreaker {
     private state: CircuitState = CircuitState.CLOSED;
     private failureCount = 0;
     private successCount = 0;

@@ -3,7 +3,6 @@
 
 generator client {
   provider   = "prisma-client-js"
-  engineType = "binary"
 }
 
 datasource db {
@@ -177,3 +176,16 @@ model AuditLog {
   @@index([action])
   @@index([createdAt])
 }
+
+// ── 邮箱验证码 ────────────────────────────────────
+model VerificationToken {
+  id         Int      @id @default(autoincrement())
+  email      String
+  token      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+
+  @@unique([email, token])
+  @@index([email])
+}
+

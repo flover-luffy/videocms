@@ -37,7 +37,7 @@ interface TmdbSearchResponse {
     total_results: number;
 }
 
-export interface TmdbMetadata {
+interface TmdbMetadata {
     tmdbId: number;
     title: string;
     type: "movie" | "tv";

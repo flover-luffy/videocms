@@ -137,6 +137,12 @@ const VideoPlayer = ({
             if (savedProgress) art.currentTime = parseFloat(savedProgress);
             art.playbackRate = playbackSpeed;
 
+            // 初始化高度变量
+            if (containerRef.current) {
+                const height = containerRef.current.clientHeight;
+                containerRef.current.style.setProperty('--player-height', `${height}px`);
+            }
+
             if (videoInfo.subtitles) {
                 for (const sub of videoInfo.subtitles) {
                     if (sub.url) {
@@ -145,6 +151,13 @@ const VideoPlayer = ({
                         break;
                     }
                 }
+            }
+        });
+
+        art.on("resize", () => {
+            if (containerRef.current) {
+                const height = containerRef.current.clientHeight;
+                containerRef.current.style.setProperty('--player-height', `${height}px`);
             }
         });
 
@@ -521,16 +534,19 @@ const VideoPlayer = ({
                     background: black !important;
                 }
                 .art-subtitle {
-                    bottom: 15% !important;
-                    font-size: clamp(20px, 4vw, 36px) !important;
+                    bottom: 4.0% !important;
+                    font-size: clamp(16px, calc(var(--player-height) * 0.045), 42px) !important;
                     font-weight: 900 !important;
                     text-shadow: 0 4px 12px rgba(0,0,0,0.95), 0 0 25px rgba(0,0,0,0.6) !important;
                     color: #fff !important;
                     padding: 0 40px !important;
                     pointer-events: none !important;
+                    transition: bottom 0.3s ease, font-size 0.3s ease !important;
                 }
-                .art-video-player:fullscreen .art-subtitle {
-                    bottom: 10% !important;
+                :fullscreen .art-subtitle,
+                .art-video-player-fullscreen .art-subtitle {
+                    bottom: 5.0% !important;
+                    font-size: clamp(24px, calc(var(--player-height) * 0.08), 60px) !important;
                 }
                 :fullscreen {
                     background-color: black !important;

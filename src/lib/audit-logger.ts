@@ -3,7 +3,7 @@ import { prisma } from "./db";
 /**
  * 审计日志类型
  */
-export enum AuditAction {
+enum AuditAction {
     // 用户操作
     USER_LOGIN = "USER_LOGIN",
     USER_LOGOUT = "USER_LOGOUT",

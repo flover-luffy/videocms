@@ -13,6 +13,7 @@ export const LoginSchema = z.object({
 
 export const RegisterSchema = z.object({
     email: z.string().email("无效的邮箱格式"),
+    code: z.string().length(6, "验证码必须是 6 位数字"),
     password: z.string().min(12, "密码至少需要 12 位")
         .regex(/[A-Z]/, "必须包含大写字母")
         .regex(/[0-9]/, "必须包含数字")

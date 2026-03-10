@@ -5,12 +5,12 @@
 import type { FileCategory } from "@/types";
 
 /** 支持的视频后缀 */
-export const VIDEO_EXTS = new Set([".mp4", ".mkv", ".avi", ".mov", ".flv", ".webm", ".m3u8", ".ts"]);
+const VIDEO_EXTS = new Set([".mp4", ".mkv", ".avi", ".mov", ".flv", ".webm", ".m3u8", ".ts"]);
 /** 支持的音频后缀 */
-export const AUDIO_EXTS = new Set([".mp3", ".flac", ".aac", ".m4a", ".ogg", ".wav", ".ape"]);
+const AUDIO_EXTS = new Set([".mp3", ".flac", ".aac", ".m4a", ".ogg", ".wav", ".ape"]);
 
 /** 集数识别正则列表（按优先级排序） */
-export const EPISODE_PATTERNS = [
+const EPISODE_PATTERNS = [
     /[Ss](\d{1,2})[Ee](\d{1,3})/,        // S01E02
     /第\s*(\d+)\s*[集话期]/,               // 第1集、第01话
     /EP\s*0*(\d+)/i,                       // EP01, ep1

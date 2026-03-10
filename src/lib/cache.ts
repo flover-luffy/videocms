@@ -8,7 +8,7 @@ import { LRUCache } from "lru-cache";
  * 应用缓存封装
  * 在 npm lru-cache 基础上提供与原接口兼容的 API
  */
-export class AppCache<T> {
+class AppCache<T> {
     private cache: LRUCache<string, any>;
     private readonly defaultTTLMs: number;
 

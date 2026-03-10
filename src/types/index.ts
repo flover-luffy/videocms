@@ -54,13 +54,6 @@ export interface ScannedItem {
     isDir?: boolean;
 }
 
-// ── API 响应包装 ──────────────────────────────────
-export interface ApiResponse<T = unknown> {
-    success: boolean;
-    data?: T;
-    error?: string;
-}
-
 // ── 播放数据 ──────────────────────────────────────
 export interface PlayUrlResult {
     url: string;

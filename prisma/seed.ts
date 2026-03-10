@@ -4,22 +4,17 @@
  * 创建初始管理员账号
  */
 import { PrismaClient } from "@prisma/client";
-import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
+import { PrismaPg } from "@prisma/adapter-pg";
+import { Pool } from "pg";
 import bcrypt from "bcryptjs";
-import path from "path";
 import dotenv from "dotenv";
 
 // 显式加载 .env 文件
 dotenv.config();
 
-// 获取数据库路径 (适配 Prisma config)
-const dbPath = process.env.DATABASE_URL?.replace("file:", "") || "./prisma/dev.db";
-const resolvedPath = path.isAbsolute(dbPath) ? dbPath : path.resolve(process.cwd(), dbPath);
-
-// 创建 Prisma adapter factory
-const adapter = new PrismaBetterSqlite3({
-    url: resolvedPath,
-});
+const connectionString = process.env.DATABASE_URL;
+const pool = new Pool({ connectionString });
+const adapter = new PrismaPg(pool);
 
 const prisma = new PrismaClient({ adapter });
 

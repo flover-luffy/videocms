@@ -25,7 +25,23 @@ export const POST = withApiHandler(async (request: NextRequest) => {
         return NextResponse.json({ error: "该邮箱已被注册" }, { status: 409 });
     }
 
-    // 2. 创建用户
+    // 2. 校验验证码
+    const validToken = await prisma.verificationToken.findFirst({
+        where: {
+            email,
+            token: result.data.code,
+            expiresAt: { gt: new Date() } // 未经过期时间
+        }
+    });
+
+    if (!validToken) {
+        return NextResponse.json({ error: "验证码错误或已过期" }, { status: 400 });
+    }
+
+    // 验证成功，立马废弃该验证码
+    await prisma.verificationToken.delete({ where: { id: validToken.id } });
+
+    // 3. 创建用户
     const salt = await bcrypt.genSalt(10);
     const hash = await bcrypt.hash(password, salt);
 

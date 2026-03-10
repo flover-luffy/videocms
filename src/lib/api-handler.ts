@@ -6,7 +6,7 @@ import { API_TIMEOUT_CONFIG } from "@/config";
  * 定义统一的 API 处理函数类型 
  * 包含对 Next.js App Router Params 的支持
  */
-export type ApiHandler<T = unknown> = (
+type ApiHandler<T = unknown> = (
     req: NextRequest,
     ctx: T
 ) => Promise<NextResponse | Response>;
@@ -14,7 +14,7 @@ export type ApiHandler<T = unknown> = (
 /**
  * API 处理器选项
  */
-export interface ApiHandlerOptions {
+interface ApiHandlerOptions {
     /** 请求超时时间（毫秒），默认 30 秒 */
     timeout?: number;
     /** 最大请求体大小（字节），默认 5MB */
