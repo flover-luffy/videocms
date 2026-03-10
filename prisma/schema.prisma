@@ -1,0 +1,179 @@
+// VideoCMS Prisma Schema - SQLite
+// learn more: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider   = "prisma-client-js"
+  engineType = "binary"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ── OpenList 连接配置 ──────────────────────────────
+model OpenlistConfig {
+  id        Int       @id @default(autoincrement())
+  name      String
+  host      String    // e.g. https://your-openlist.com
+  token     String    // 访问 Token（建议加密后存储）
+  createdAt DateTime  @default(now())
+
+  series    Series[]
+  albums    Album[]
+}
+
+// ── 影视剧集 ──────────────────────────────────────
+model Series {
+  id              Int             @id @default(autoincrement())
+  title           String
+  type            String          @default("tv") // movie | tv | documentary | variety
+  sourcePath      String          // OpenList 目录路径
+  tmdbId          Int?
+  posterUrl       String?
+  backdropUrl     String?
+  overview        String?
+  voteAverage     Float?
+  year            Int?
+  genres          Json?          // 原 String? 改为 Json?
+  cast            Json?          // 原 String? 改为 Json?
+  director        String?        // 导演/制作人
+  tmdbData        Json?          // 原 String? 改为 Json?
+  isFeatured      Boolean         @default(false)
+  playCount       Int             @default(0)
+  manualMatched   Boolean         @default(false)
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  openlistConfig  OpenlistConfig  @relation(fields: [openlistConfigId], references: [id])
+  openlistConfigId Int
+
+  episodes        Episode[]
+  favorites       Favorite[]
+  playEvents      PlayEvent[]
+
+  @@unique([openlistConfigId, sourcePath])
+}
+
+// ── 视频集数 ──────────────────────────────────────
+model Episode {
+  id          Int        @id @default(autoincrement())
+  seasonNum   Int        @default(1)
+  episodeNum  Int
+  title       String?
+  openlistPath String    // 只存路径，不存直链
+  duration    Int?       // 秒
+  fileSize    BigInt?
+  createdAt   DateTime   @default(now())
+
+  series      Series     @relation(fields: [seriesId], references: [id], onDelete: Cascade)
+  seriesId    Int
+  progress    WatchProgress[]
+
+  @@unique([seriesId, seasonNum, episodeNum])
+}
+
+
+// ── 音乐专辑 ──────────────────────────────────────
+model Album {
+  id          Int             @id @default(autoincrement())
+  title       String
+  artist      String?
+  coverUrl    String?
+  year        Int?
+  genre       String?
+  sourcePath  String
+
+  openlistConfig   OpenlistConfig @relation(fields: [openlistConfigId], references: [id])
+  openlistConfigId Int
+
+  tracks      Track[]
+  createdAt   DateTime        @default(now())
+
+  @@unique([openlistConfigId, sourcePath])
+}
+
+// ── 音频曲目 ──────────────────────────────────────
+model Track {
+  id           Int      @id @default(autoincrement())
+  trackNum     Int?
+  title        String
+  artist       String?
+  duration     Int?
+  openlistPath String
+  lyricsPath   String?
+
+  album        Album    @relation(fields: [albumId], references: [id], onDelete: Cascade)
+  albumId      Int
+
+  @@unique([albumId, openlistPath])
+}
+
+// ── 用户 ──────────────────────────────────────────
+model User {
+  id           Int      @id @default(autoincrement())
+  email        String   @unique
+  passwordHash String
+  role         String   @default("user") // admin | user
+  createdAt    DateTime @default(now())
+
+  progress     WatchProgress[]
+  favorites    Favorite[]
+}
+
+// ── 观看进度(云端同步) ─────────────────────────────
+model WatchProgress {
+  id         Int      @id @default(autoincrement())
+  position   Int      @default(0) // 秒
+  duration   Int?
+  updatedAt  DateTime @updatedAt
+
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId     Int
+  episode    Episode  @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+  episodeId  Int
+
+  @@unique([userId, episodeId])
+  @@index([userId])
+}
+
+// ── 收藏 ──────────────────────────────────────────
+model Favorite {
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    Int
+  series    Series   @relation(fields: [seriesId], references: [id], onDelete: Cascade)
+  seriesId  Int
+
+  @@id([userId, seriesId])
+}
+
+// ── 播放统计(防刷) ─────────────────────────────────
+model PlayEvent {
+  id        Int      @id @default(autoincrement())
+  ip        String
+  userId    Int?
+  createdAt DateTime @default(now())
+
+  series    Series   @relation(fields: [seriesId], references: [id], onDelete: Cascade)
+  seriesId  Int
+}
+
+// ── 审计日志 ──────────────────────────────────────
+model AuditLog {
+  id            Int      @id @default(autoincrement())
+  action        String   // AuditAction 枚举值
+  userId        Int?
+  userEmail     String?
+  ipAddress     String
+  resourceType  String?
+  resourceId    Int?
+  details       Json?    // 原 String? 改为 Json?
+  status        String   // "success" | "failure"
+  errorMessage  String?
+  createdAt     DateTime @default(now())
+
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+}

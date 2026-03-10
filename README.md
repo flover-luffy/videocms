@@ -1,36 +1,88 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# VideoCMS
 
-## Getting Started
+一个基于 Next.js 的视频内容管理系统,支持影视剧集和音乐专辑管理。
 
-First, run the development server:
+## 技术栈
+
+- **框架**: Next.js 16 (App Router)
+- **数据库**: SQLite (Prisma ORM 7)
+- **认证**: JWT
+- **UI**: Tailwind CSS
+- **视频播放**: Artplayer + HLS.js
+
+## 快速开始
+
+### 1. 安装依赖
+
+```bash
+npm install
+```
+
+### 2. 配置环境变量
+
+复制 `.env.example` 到 `.env` 并配置:
+
+```bash
+cp .env.example .env
+```
+
+### 3. 初始化数据库
+
+```bash
+# 应用数据库迁移
+npx prisma migrate deploy
+
+# 创建管理员账号
+npm run db:seed
+```
+
+### 4. 启动开发服务器
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+访问 http://localhost:3000
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## 默认管理员账号
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- 邮箱: `admin@videocms.local`
+- 密码: `admin123456`
 
-## Learn More
+## 可用脚本
 
-To learn more about Next.js, take a look at the following resources:
+- `npm run dev` - 启动开发服务器
+- `npm run build` - 构建生产版本
+- `npm run start` - 启动生产服务器
+- `npm run db:seed` - 初始化数据库并创建管理员账号
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## 功能特性
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+- 📺 影视剧集管理
+- 🎵 音乐专辑管理
+- 🔍 TMDB 元数据自动匹配
+- 👤 用户认证与授权
+- 📊 观看进度同步
+- ⭐ 收藏功能
+- 🎬 在线视频播放
+- 🎨 响应式设计
 
-## Deploy on Vercel
+## 项目结构
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+```
+├── prisma/          # 数据库 schema 和迁移
+├── public/          # 静态资源
+├── scripts/         # 工具脚本
+├── src/
+│   ├── app/         # Next.js App Router 页面
+│   ├── components/  # React 组件
+│   ├── lib/         # 工具库和配置
+│   ├── middleware/  # 中间件
+│   ├── services/    # 业务逻辑服务
+│   └── types/       # TypeScript 类型定义
+└── ...
+```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## License
+
+MIT

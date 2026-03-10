@@ -11,8 +11,20 @@ const eslintConfig = defineConfig([
     ".next/**",
     "out/**",
     "build/**",
-    "next-env.d.ts",
   ]),
+  {
+    settings: {
+      react: {
+        version: "19.0.0",
+      },
+    },
+    rules: {
+      "@typescript-eslint/no-explicit-any": "off",
+      "@typescript-eslint/ban-ts-comment": "off",
+      "react-hooks/exhaustive-deps": "off",
+      "prefer-const": "warn",
+    }
+  }
 ]);
 
 export default eslintConfig;
