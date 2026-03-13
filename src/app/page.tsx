@@ -10,26 +10,39 @@ export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
   let [featured] = await Promise.all([
-    prisma.series.findMany({ where: { isFeatured: true }, take: 5 })
+    prisma.series.findMany({ where: { isFeatured: true }, take: 5, include: { _count: { select: { episodes: true } } } })
   ]);
   const [trending, highlyRated, latest] = await Promise.all([
-    prisma.series.findMany({ orderBy: { playCount: "desc" }, take: 12 }),
-    prisma.series.findMany({ orderBy: { voteAverage: "desc" }, take: 12 }),
-    prisma.series.findMany({ orderBy: { updatedAt: "desc" }, take: 12 }),
+    prisma.series.findMany({ orderBy: { playCount: "desc" }, take: 12, include: { _count: { select: { episodes: true } } } }),
+    prisma.series.findMany({ orderBy: { voteAverage: "desc" }, take: 12, include: { _count: { select: { episodes: true } } } }),
+    prisma.series.findMany({ orderBy: { updatedAt: "desc" }, take: 12, include: { _count: { select: { episodes: true } } } }),
   ]);
 
   if (!featured || featured.length === 0) {
     featured = await prisma.series.findMany({
       where: { backdropUrl: { not: null } },
       orderBy: { playCount: "desc" },
-      take: 5
+      take: 5,
+      include: { _count: { select: { episodes: true } } }
     });
   }
 
+  featured = featured.map((s: any) => ({
+    ...s,
+    episodeCount: s._count?.episodes,
+    type: "series"
+  }));
+
+  const mapSeries = (items: any[]) => items.map(s => ({
+    ...s,
+    episodeCount: s._count?.episodes,
+    type: s.type || "series"
+  }));
+
   const Sections = [
-    { title: "热门播放", items: trending, href: "/library/videos" },
-    { title: "高分佳作", items: highlyRated, href: "/library/videos" },
-    { title: "最近更新", items: latest, href: "/library/videos" },
+    { title: "最受关注", items: mapSeries(trending), icon: "🔥", href: "/library/videos" },
+    { title: "高分必看", items: mapSeries(highlyRated), icon: "⭐️", href: "/library/videos" },
+    { title: "最近更新", items: mapSeries(latest), icon: "✨", href: "/library/videos" },
   ];
 
   return (

@@ -56,9 +56,9 @@ export default function PlayPage({ params }: { params: Promise<{ seriesId: strin
                     <span className="text-blue-500 italic">第 {episode.episodeNum} 集</span>
                 </nav>
 
-                <div className="grid grid-cols-1 xl:grid-cols-[1fr_400px] gap-8 items-stretch">
-                    {/* 播放器主视窗 */}
-                    <div className="space-y-8">
+                <div className="flex flex-col gap-8">
+                    {/* 第一行：播放器 + 选集列表 */}
+                    <div className="grid grid-cols-1 xl:grid-cols-[1fr_400px] gap-8 items-stretch">
                         {/* 悬浮播放器便当盒 */}
                         <div className="bento-card p-2 md:p-4 relative">
                             <div className="relative rounded-[2rem] overflow-hidden bg-black shadow-inner ring-1 ring-white/10">
@@ -66,6 +66,39 @@ export default function PlayPage({ params }: { params: Promise<{ seriesId: strin
                             </div>
                         </div>
 
+                        <aside className="bento-card p-6 md:p-8 flex flex-col shadow-[0_20px_50px_#00000066]">
+                            {/* 固定的标题栏 */}
+                            <div className="flex justify-between items-end shrink-0 mb-6 border-b border-white/10 pb-4">
+                                <h2 className="text-xl font-black text-white tracking-widest flex items-center gap-2">
+                                    <span className="w-2 h-2 rounded-full bg-blue-500 shadow-[0_0_10px_#3b82f6]" /> 选集列表
+                                </h2>
+                                <span className="text-xs font-bold text-slate-500 tracking-widest bg-white/5 px-3 py-1 rounded-lg">共 {allEpisodes.length} 集</span>
+                            </div>
+
+                            <div className="flex-grow overflow-y-auto pr-4 scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent space-y-3">
+                                <div className="grid grid-cols-4 sm:grid-cols-5 xl:grid-cols-4 gap-3">
+                                    {allEpisodes.map((ep) => {
+                                        const isCurrent = ep.id === episode.id;
+                                        return (
+                                            <Link
+                                                key={ep.id}
+                                                href={`/play/${series.id}/${ep.id}`}
+                                                className={`aspect-[5/3] flex items-center justify-center rounded-2xl text-sm font-black transition-all duration-300 ease-[var(--ease-smooth)] hover:scale-105 hover:-translate-y-1 ${isCurrent
+                                                    ? "bg-blue-600 text-white shadow-[0_10px_20px_#3b82f666] ring-2 ring-blue-400/50"
+                                                    : "aura-glass text-slate-400 hover:text-white hover:bg-white/10 hover:shadow-[0_8px_20px_#ffffff1a]"
+                                                    }`}
+                                            >
+                                                {ep.episodeNum}
+                                            </Link>
+                                        )
+                                    })}
+                                </div>
+                            </div>
+                        </aside>
+                    </div>
+
+                    {/* 第二行：信息区 */}
+                    <div className="grid grid-cols-1 xl:grid-cols-[1fr_400px] gap-8 items-start">
                         {/* 播放器下方信息区便当盒 */}
                         <div className="bento-card p-8 flex flex-col lg:flex-row justify-between items-start gap-12">
                             <div className="space-y-8 flex-grow">
@@ -156,36 +189,6 @@ export default function PlayPage({ params }: { params: Promise<{ seriesId: strin
                             </div>
                         </div>
                     </div>
-
-                    <aside className="xl:sticky xl:top-32 bento-card p-6 md:p-8 flex flex-col shadow-[0_20px_50px_#00000066]">
-                        {/* 固定的标题栏 */}
-                        <div className="flex justify-between items-end shrink-0 mb-6 border-b border-white/10 pb-4">
-                            <h2 className="text-xl font-black text-white tracking-widest flex items-center gap-2">
-                                <span className="w-2 h-2 rounded-full bg-blue-500 shadow-[0_0_10px_#3b82f6]" /> 选集列表
-                            </h2>
-                            <span className="text-xs font-bold text-slate-500 tracking-widest bg-white/5 px-3 py-1 rounded-lg">共 {allEpisodes.length} 集</span>
-                        </div>
-
-                        <div className="flex-grow overflow-y-auto pr-4 scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent space-y-3">
-                            <div className="grid grid-cols-4 sm:grid-cols-5 xl:grid-cols-4 gap-3">
-                                {allEpisodes.map((ep) => {
-                                    const isCurrent = ep.id === episode.id;
-                                    return (
-                                        <Link
-                                            key={ep.id}
-                                            href={`/play/${series.id}/${ep.id}`}
-                                            className={`aspect-[5/3] flex items-center justify-center rounded-2xl text-sm font-black transition-all duration-300 ease-[var(--ease-smooth)] hover:scale-105 hover:-translate-y-1 ${isCurrent
-                                                ? "bg-blue-600 text-white shadow-[0_10px_20px_#3b82f666] ring-2 ring-blue-400/50"
-                                                : "aura-glass text-slate-400 hover:text-white hover:bg-white/10 hover:shadow-[0_8px_20px_#ffffff1a]"
-                                                }`}
-                                        >
-                                            {ep.episodeNum}
-                                        </Link>
-                                    )
-                                })}
-                            </div>
-                        </div>
-                    </aside>
                 </div>
             </div>
         </PageLayout>

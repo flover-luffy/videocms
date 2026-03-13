@@ -8,6 +8,7 @@ import Hls from "hls.js";
 import { motion, AnimatePresence } from "framer-motion";
 import { useRouter } from "next/navigation";
 import { fetchWithCsrf } from "@/lib/fetch-client";
+import ExternalPlayerLinks from "./ExternalPlayerLinks";
 
 interface Subtitle {
     url: string;
@@ -23,10 +24,6 @@ interface VideoInfo {
     poster?: string;
 }
 
-
-
-import ExternalPlayerLinks from "./ExternalPlayerLinks";
-
 const VideoPlayer = ({
     seriesId,
     episodeId,
@@ -38,9 +35,9 @@ const VideoPlayer = ({
 }) => {
     const router = useRouter();
     const containerRef = useRef<HTMLDivElement>(null);
-    const playerWrapperRef = useRef<HTMLDivElement>(null); // 新增：接管全屏显示的包装器
+    const playerWrapperRef = useRef<HTMLDivElement>(null);
     const artRef = useRef<Artplayer | null>(null);
-    const isSeekingRef = useRef(false); // 新增：锁定拖拽状态
+    const isSeekingRef = useRef(false);
 
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -96,7 +93,6 @@ const VideoPlayer = ({
         fetchPlayData();
     }, [fetchPlayData]);
 
-    // 监听全屏变化
     useEffect(() => {
         const handleFullscreenChange = () => {
             setIsFullscreen(!!document.fullscreenElement);
@@ -108,6 +104,26 @@ const VideoPlayer = ({
     useEffect(() => {
         if (!videoInfo || !containerRef.current) return;
 
+        // Monkey-patch Worker to support ESM worker loading for JASSUB
+        const OriginalWorker = window.Worker;
+        const JassubWorkerProxy = class extends OriginalWorker {
+            constructor(url: string | URL, options?: WorkerOptions) {
+                const urlString = url.toString();
+                // 只要是 jassub 相关的 worker，或者是 jassub 目录下的，都强制 ESM 模式
+                if (urlString.includes('jassub') || urlString.includes('worker')) {
+                    super(url, { 
+                        ...options, 
+                        type: 'module',
+                        credentials: 'same-origin' // 关键：允许带上 cookie 以绕过部分 WAF/EdgeOne 验证
+                    });
+                } else {
+                    super(url, options);
+                }
+            }
+        };
+        // @ts-ignore
+        window.Worker = JassubWorkerProxy;
+
         const art = new Artplayer({
             container: containerRef.current,
             url: videoInfo.url,
@@ -115,11 +131,25 @@ const VideoPlayer = ({
             autoplay: true,
             muted: false,
             playbackRate: true,
-            fullscreen: false, // 禁用原生全屏，由 React 接管
+            aspectRatio: true,
+            setting: true,
+            hotkey: true,
             pip: true,
             screenshot: true,
-            setting: true,
-            controls: [],
+            fullscreen: false,
+            moreVideoAttr: {
+                crossOrigin: "anonymous",
+            },
+            subtitle: {
+                url: "",
+                type: "srt",
+                style: {
+                    color: "#ffffff",
+                    fontSize: "20px",
+                },
+                encoding: "utf-8",
+                escape: false,
+            },
             customType: {
                 m3u8: function (video: HTMLVideoElement, url: string) {
                     if (Hls.isSupported()) {
@@ -129,14 +159,15 @@ const VideoPlayer = ({
                     } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
                         video.src = url;
                     }
+                    video.crossOrigin = "anonymous";
                 },
             },
             plugins: [
                 artplayerPluginJassub({
                     debug: false,
-                    workerUrl: '/libs/jassub/worker/jassub-worker.js',
-                    wasmUrl: '/libs/jassub/wasm/jassub-worker.wasm',
-                    modernWasmUrl: '/libs/jassub/wasm/jassub-worker-modern.wasm',
+                    workerUrl: "/libs/jassub/wasm/jassub-worker.js",
+                    wasmUrl: "/libs/jassub/wasm/jassub-worker.wasm",
+                    modernWasmUrl: "/libs/jassub/wasm/jassub-worker-modern.wasm",
                 }),
             ],
         });
@@ -148,24 +179,31 @@ const VideoPlayer = ({
             if (savedProgress) art.currentTime = parseFloat(savedProgress);
             art.playbackRate = playbackSpeed;
 
-            // 初始化高度变量
             if (containerRef.current) {
                 const height = containerRef.current.clientHeight;
-                containerRef.current.style.setProperty('--player-height', `${height}px`);
+                containerRef.current.style.setProperty("--player-height", `${height}px`);
             }
 
-            if (videoInfo.subtitles) {
-                for (const sub of videoInfo.subtitles) {
-                    if (sub.url) {
-                        const isAss = sub.url.toLowerCase().endsWith('.ass') || sub.url.toLowerCase().endsWith('.ssa');
-                        if (isAss) {
-                            // 使用插件切换 ASS 字幕
-                            (art.plugins as any).artplayerPluginJassub.switch(sub.url);
-                        } else {
-                            art.subtitle.url = sub.url;
-                            art.subtitle.show = true;
+            // --- 字幕加载逻辑优化 ---
+            if (videoInfo.subtitles && videoInfo.subtitles.length > 0) {
+                // 找到第一个可用的字幕，优先尝试 ASS
+                const assSub = videoInfo.subtitles.find(s => s.url && (s.url.toLowerCase().endsWith('.ass') || s.url.toLowerCase().endsWith('.ssa')));
+                const srtSub = videoInfo.subtitles.find(s => s.url && !s.url.toLowerCase().endsWith('.ass') && !s.url.toLowerCase().endsWith('.ssa'));
+
+                const targetSub = assSub || srtSub;
+
+                if (targetSub && targetSub.url) {
+                    const isAss = targetSub.url.toLowerCase().endsWith('.ass') || targetSub.url.toLowerCase().endsWith('.ssa');
+                    if (isAss) {
+                        // 逻辑：如果是 ASS，启用 JASSUB 插件，并关闭原生字幕显示以防冲突
+                        art.subtitle.show = false;
+                        if ((art.plugins as any).artplayerPluginJassub) {
+                            (art.plugins as any).artplayerPluginJassub.switch(targetSub.url);
                         }
-                        break;
+                    } else {
+                        // 逻辑：如果是 SRT/VTT，使用原生字幕
+                        art.subtitle.url = targetSub.url;
+                        art.subtitle.show = true;
                     }
                 }
             }
@@ -209,6 +247,7 @@ const VideoPlayer = ({
 
         return () => {
             clearInterval(syncTimer);
+            window.Worker = OriginalWorker;
             if (artRef.current) artRef.current.destroy();
         };
     }, [videoInfo, episodeId, nextEpisodeId, router, seriesId, autoNext, playbackSpeed]);
@@ -219,6 +258,11 @@ const VideoPlayer = ({
         controlsTimerRef.current = setTimeout(() => {
             if (isPlaying && !showSettings) setShowControls(false);
         }, 3500);
+    };
+
+    const handleTogglePlay = () => {
+        if (!artRef.current) return;
+        artRef.current.toggle();
     };
 
     const handleScreenshot = async () => {
@@ -236,6 +280,16 @@ const VideoPlayer = ({
         } catch (err) {
             console.error("[Player] Screenshot Error:", err);
         }
+    };
+
+    const handleVolumeChange = (newVolume: number[]) => {
+        if (!artRef.current) return;
+        artRef.current.volume = newVolume[0];
+    };
+
+    const handleToggleMute = () => {
+        if (!artRef.current) return;
+        artRef.current.muted = !artRef.current.muted;
     };
 
     const handlePip = () => {
@@ -263,10 +317,8 @@ const VideoPlayer = ({
                 onMouseMove={handleMouseMove}
                 onMouseLeave={() => isPlaying && setShowControls(false)}
             >
-                {/* 底层播放器渲染容器 */}
                 <div ref={containerRef} className="w-full h-full z-0" />
 
-                {/* 状态层：加载/错误/控制 */}
                 <div className="absolute inset-0 z-[100] pointer-events-none">
                     <AnimatePresence>
                         {isLoading && (
@@ -311,7 +363,6 @@ const VideoPlayer = ({
                             animate={{ opacity: showControls ? 1 : 0 }}
                             transition={{ duration: 0.4 }}
                         >
-                            {/* 截图预览 */}
                             <AnimatePresence>
                                 {screenshotPreview && (
                                     <motion.div
@@ -320,14 +371,12 @@ const VideoPlayer = ({
                                         exit={{ opacity: 0, scale: 0.9 }}
                                         className="absolute right-8 bottom-32 p-2 aura-glass rounded-2xl pointer-events-auto"
                                     >
-                                        {/* eslint-disable-next-line @next/next/no-img-element */}
                                         <img src={screenshotPreview} className="w-48 rounded-xl" alt="Screenshot" />
                                         <div className="absolute -top-2 -right-2 bg-blue-500 text-[8px] font-black text-white px-2 py-0.5 rounded-full uppercase tracking-tighter shadow-lg">Saved</div>
                                     </motion.div>
                                 )}
                             </AnimatePresence>
 
-                            {/* 高级设置面板 */}
                             <AnimatePresence>
                                 {showSettings && (
                                     <motion.div
@@ -372,9 +421,7 @@ const VideoPlayer = ({
                                 )}
                             </AnimatePresence>
 
-                            {/* 控制面板主体 */}
                             <div className={`relative px-8 pb-4 flex flex-col pointer-events-auto bg-gradient-to-t from-black/80 via-black/40 to-transparent pt-20 ${isFullscreen ? "pb-12" : "pb-2"}`}>
-                                {/* 交互进度条 */}
                                 <div className="relative group/progress h-1.5 w-full flex items-center cursor-pointer mb-4">
                                     <div className="absolute inset-x-0 h-1.5 bg-white/20 rounded-full" />
                                     <motion.div
@@ -394,21 +441,15 @@ const VideoPlayer = ({
                                         }}
                                         onMouseDown={() => { isSeekingRef.current = true; }}
                                         onMouseUp={() => { isSeekingRef.current = false; }}
-                                        onTouchStart={() => { isSeekingRef.current = true; }}
-                                        onTouchEnd={() => { isSeekingRef.current = false; }}
                                         className="absolute inset-0 opacity-0 cursor-pointer z-20"
-                                    />
-                                    <motion.div
-                                        className="absolute w-4 h-4 bg-white rounded-full border-2 border-blue-500 shadow-2xl z-20 pointer-events-none opacity-0 group-hover/progress:opacity-100 transition-opacity"
-                                        style={{ left: `${duration > 0 ? (currentTime / duration) * 100 : 0}%`, transform: "translateX(-50%)" }}
                                     />
                                 </div>
 
                                 <div className="flex items-center justify-between h-10">
                                     <div className="flex items-center gap-6">
                                         <button
-                                            onClick={() => artRef.current && artRef.current.toggle()}
-                                            className="text-white hover:text-blue-400 transition-all transform active:scale-90 filter drop-shadow-[0_0_10px_rgba(0,0,0,1)]"
+                                            onClick={handleTogglePlay}
+                                            className="text-white hover:text-blue-400 transition-all transform active:scale-90"
                                         >
                                             {isPlaying ? (
                                                 <svg className="w-10 h-10" fill="currentColor" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" /></svg>
@@ -421,22 +462,22 @@ const VideoPlayer = ({
                                             <button
                                                 disabled={!prevEpisodeId}
                                                 onClick={() => prevEpisodeId && router.push(`/play/${seriesId}/${prevEpisodeId}`)}
-                                                className="w-10 h-10 flex items-center justify-center rounded-xl bg-white/10 text-white hover:bg-white/20 transition-all disabled:opacity-5 active:scale-95 drop-shadow-[0_0_8px_rgba(0,0,0,1)]"
+                                                className="w-10 h-10 flex items-center justify-center rounded-xl bg-white/10 text-white hover:bg-white/20 disabled:opacity-5 active:scale-95 transition-all"
                                             >
                                                 <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6 8.5 6V6z" /></svg>
                                             </button>
                                             <button
                                                 disabled={!nextEpisodeId}
                                                 onClick={() => nextEpisodeId && router.push(`/play/${seriesId}/${nextEpisodeId}`)}
-                                                className="w-10 h-10 flex items-center justify-center rounded-xl bg-white/10 text-white hover:bg-white/20 transition-all disabled:opacity-5 active:scale-95 drop-shadow-[0_0_8px_rgba(0,0,0,1)]"
+                                                className="w-10 h-10 flex items-center justify-center rounded-xl bg-white/10 text-white hover:bg-white/20 disabled:opacity-5 active:scale-95 transition-all"
                                             >
                                                 <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="m6 18 8.5-6L6 6zm9-12v12h2V6z" /></svg>
                                             </button>
                                         </div>
 
-                                        <div className="flex items-center gap-2 text-white font-mono drop-shadow-[0_0_10px_rgba(0,0,0,1)]">
+                                        <div className="flex items-center gap-2 text-white font-mono">
                                             <span className="text-[14px] font-black tabular-nums">{formatTime(currentTime)}</span>
-                                            <span className="text-[14px] font-black opacity-30">{"/"}</span>
+                                            <span className="text-[14px] font-black opacity-30">/</span>
                                             <span className="text-[14px] font-black opacity-60 tabular-nums">{formatTime(duration)}</span>
                                         </div>
                                     </div>
@@ -444,38 +485,35 @@ const VideoPlayer = ({
                                     <div className="flex items-center gap-6">
                                         <button
                                             onClick={handleScreenshot}
-                                            className="w-10 h-10 flex items-center justify-center rounded-xl text-white hover:bg-white/10 transition-all drop-shadow-[0_0_8px_rgba(0,0,0,1)]"
+                                            className="w-10 h-10 flex items-center justify-center rounded-xl text-white hover:bg-white/10 transition-all"
                                             title="截图"
                                         >
                                             <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="3" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M6.827 6.175A2.31 2.31 0 015.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 002.25 2.25h15a2.25 2.25 0 002.25-2.25V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 00-1.134-.175 2.31 2.31 0 01-1.64-1.055l-.822-1.316a2.192 2.192 0 00-1.736-1.039 48.774 48.774 0 00-5.232 0 2.192 2.192 0 00-1.736 1.039l-.821 1.316z" /><path strokeLinecap="round" strokeLinejoin="round" d="M16.5 12.75a4.5 4.5 0 11-9 0 4.5 4.5 0 019 0zM18.75 10.5h.008v.008h-.008V10.5z" /></svg>
                                         </button>
 
-                                        <div className="flex items-center gap-3 group/volume relative scale-100">
-                                            <div className="flex items-center gap-2">
-                                                <button
-                                                    onClick={() => artRef.current && (artRef.current.muted = !artRef.current.muted)}
-                                                    className="text-white hover:text-blue-400 transition-colors drop-shadow-[0_0_8px_rgba(0,0,0,1)]"
-                                                >
-                                                    {(isMuted || volume === 0) ? (
-                                                        <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77zM3 9v6h4l5 5V4L7 9H3z" /></svg>
-                                                    ) : (
-                                                        <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z" /></svg>
-                                                    )}
-                                                </button>
-                                                <div className="relative w-24 h-1 bg-white/30 rounded-full overflow-hidden">
-                                                    <div className="absolute inset-y-0 left-0 bg-white shadow-[0_0_10px_white]" style={{ width: `${volume * 100}%` }} />
-                                                    <input
-                                                        type="range"
-                                                        min="0"
-                                                        max="1"
-                                                        step="0.01"
-                                                        value={volume}
-                                                        onChange={(e) => artRef.current && (artRef.current.volume = parseFloat(e.target.value))}
-                                                        className="absolute inset-0 opacity-0 cursor-pointer"
-                                                    />
-                                                </div>
+                                        <div className="flex items-center gap-3">
+                                            <button
+                                                onClick={handleToggleMute}
+                                                className="text-white hover:text-blue-400 transition-colors"
+                                            >
+                                                {isMuted || volume === 0 ? (
+                                                    <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77zM3 9v6h4l5 5V4L7 9H3z" /></svg>
+                                                ) : (
+                                                    <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z" /></svg>
+                                                )}
+                                            </button>
+                                            <div className="relative w-24 h-1 bg-white/30 rounded-full overflow-hidden">
+                                                <div className="absolute inset-y-0 left-0 bg-white" style={{ width: `${volume * 100}%` }} />
+                                                <input
+                                                    type="range"
+                                                    min="0"
+                                                    max="1"
+                                                    step="0.01"
+                                                    value={volume}
+                                                    onChange={(e) => handleVolumeChange([parseFloat(e.target.value)])}
+                                                    className="absolute inset-0 opacity-0 cursor-pointer"
+                                                />
                                             </div>
-                                            {/* 音量百分比数值 */}
                                             <span className="text-[10px] font-black text-white/40 tabular-nums w-8">
                                                 {Math.round(volume * 100)}%
                                             </span>
@@ -483,7 +521,7 @@ const VideoPlayer = ({
 
                                         <button
                                             onClick={handlePip}
-                                            className={`w-10 h-10 flex items-center justify-center rounded-xl transition-all drop-shadow-[0_0_8px_rgba(0,0,0,1)] ${isPip ? "text-blue-500 bg-blue-500/20 shadow-inner" : "text-white hover:bg-white/10"}`}
+                                            className={`w-10 h-10 flex items-center justify-center rounded-xl transition-all ${isPip ? "text-blue-500 bg-blue-500/20 shadow-inner" : "text-white hover:bg-white/10"}`}
                                             title="画中画"
                                         >
                                             <svg className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth="3" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6.75V12m0 0H18m-4.5 0l4.5 4.5M4.5 19.5h15a2.25 2.25 0 002.25-2.25V6.75A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25v10.5A2.25 2.25 0 004.5 19.5z" /></svg>
@@ -491,14 +529,14 @@ const VideoPlayer = ({
 
                                         <button
                                             onClick={() => setShowSettings(!showSettings)}
-                                            className={`w-10 h-10 flex items-center justify-center rounded-xl transition-all drop-shadow-[0_0_8px_rgba(0,0,0,1)] ${showSettings ? "text-blue-500 bg-blue-500/20 shadow-inner" : "text-white hover:bg-white/10"}`}
+                                            className={`w-10 h-10 flex items-center justify-center rounded-xl transition-all ${showSettings ? "text-blue-500 bg-blue-500/20 shadow-inner" : "text-white hover:bg-white/10"}`}
                                         >
                                             <svg className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth="3" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M10.5 6h9.75M10.5 6a1.5 1.5 0 11-3 0m3 0a1.5 1.5 0 10-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 11-3 0m3 0a1.5 1.5 0 10-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 11-3 0m3 0a1.5 1.5 0 10-3 0m-9.75 0h9.75" /></svg>
                                         </button>
 
                                         <button
                                             onClick={handleToggleFullscreen}
-                                            className={`w-12 h-12 flex items-center justify-center rounded-xl transition-all drop-shadow-[0_0_15px_rgba(37,99,235,1)] ${isFullscreen ? "bg-blue-600 text-white" : "bg-blue-500/40 text-blue-400 hover:bg-blue-500 hover:text-white"}`}
+                                            className={`w-12 h-12 flex items-center justify-center rounded-xl transition-all ${isFullscreen ? "bg-blue-600 text-white" : "bg-blue-500/40 text-blue-400 hover:bg-blue-500 hover:text-white"}`}
                                         >
                                             <svg className="w-7 h-7" fill="currentColor" viewBox="0 0 24 24"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z" /></svg>
                                         </button>
@@ -510,7 +548,6 @@ const VideoPlayer = ({
                 </div>
             </div>
 
-            {/* 底部信息与第三方链接 - 绝对贴边 */}
             {!isFullscreen && (
                 <div className="relative flex flex-col items-center justify-center px-10 pt-1 pb-0 bg-transparent border-t-0 z-[110]">
                     <AnimatePresence>
@@ -525,7 +562,6 @@ const VideoPlayer = ({
                         )}
                     </AnimatePresence>
 
-                    {/* 自动连播 (物理最底边) */}
                     <div className="absolute right-6 bottom-0">
                         <div
                             onClick={() => setAutoNext(!autoNext)}

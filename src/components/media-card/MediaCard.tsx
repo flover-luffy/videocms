@@ -11,9 +11,20 @@ interface MediaCardProps {
     voteAverage?: number | null;
     year?: number | null;
     episodeCount?: number;
+    type?: string;
 }
 
-export default function MediaCard({ id, title, posterUrl, voteAverage, year, episodeCount }: MediaCardProps) {
+export default function MediaCard({ id, title, posterUrl, voteAverage, year, episodeCount, type }: MediaCardProps) {
+    const typeMap: Record<string, string> = {
+        movie: "电影",
+        tv: "剧集",
+        series: "剧集",
+        documentary: "纪录片",
+        variety: "综艺",
+    };
+
+    const label = (type && typeMap[type]) || (episodeCount === 1 ? "电影" : "剧集");
+
     return (
         <motion.div
             whileHover={{ y: -8 }}
@@ -51,7 +62,7 @@ export default function MediaCard({ id, title, posterUrl, voteAverage, year, epi
                     {(episodeCount !== undefined || true) && (
                         <div className="absolute top-3 left-3 px-2 py-0.5 rounded-lg bg-black/40 backdrop-blur-md border border-white/10 z-20">
                             <span className="text-[10px] font-black text-white/90 uppercase tracking-widest">
-                                {episodeCount === 1 ? "电影" : "剧集"}
+                                {label}
                             </span>
                         </div>
                     )}
