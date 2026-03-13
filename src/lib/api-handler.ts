@@ -65,22 +65,30 @@ export function withApiHandler<T = unknown>(
                 timeout,
                 `请求超时（${timeout}ms）`
             );
-        } catch (error: unknown) {
-            console.error("[API ERROR]", error);
+        } catch (error: any) {
+            console.error("[API ERROR DEPTH]", {
+                message: error.message,
+                stack: error.stack,
+                cause: error.cause,
+                details: error
+            });
 
-            // 1. 优先处理类型化业务错误（携带精确状态码）
+            // 1. 优先处理类型化业务错误
             if (error instanceof AppError) {
                 return NextResponse.json({ error: error.message }, { status: error.statusCode });
             }
 
-            // 2. Prisma 记录不存在 (P2025)
-            if (error && typeof error === 'object' && 'code' in error && error.code === 'P2025') {
+            // 2. Prisma 记录不存在
+            if (error?.code === 'P2025') {
                 return NextResponse.json({ error: "请求的资源不存在" }, { status: 404 });
             }
 
-            // 3. 通用错误兜底
-            const message = error instanceof Error ? error.message : "Internal Server Error";
-            return NextResponse.json({ error: message }, { status: 500 });
+            // 3. 开发环境返回具体消息
+            const isDev = process.env.NODE_ENV !== "production";
+            return NextResponse.json({ 
+                error: isDev ? (error.message || "Internal Server Error") : "Internal Server Error",
+                stack: isDev ? error.stack : undefined
+            }, { status: 500 });
         }
     };
 }

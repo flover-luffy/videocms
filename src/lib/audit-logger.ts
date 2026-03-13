@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { prisma } from "./db";
 
 /**
@@ -53,7 +54,7 @@ export class AuditLogger {
                     ipAddress: entry.ipAddress,
                     resourceType: entry.resourceType,
                     resourceId: entry.resourceId,
-                    details: (entry.details as any) || null, // 使用 any 绕过 Json 严格检查
+                    details: (entry.details as Prisma.InputJsonValue) ?? undefined,
                     status: entry.status,
                     errorMessage: entry.errorMessage,
                 }

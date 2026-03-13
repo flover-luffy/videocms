@@ -80,8 +80,11 @@ export async function middleware(request: NextRequest) {
     const { pathname } = request.nextUrl;
 
     // 1. CSRF 防护校验（针对 POST/PUT/DELETE/PATCH）
-    const csrfError = CsrfProtection.middleware(request);
-    if (csrfError) return csrfError;
+    // 特殊：豁免监控隧道，因为它无法携带自定义 CSRF Header
+    if (pathname !== '/api/glitchtip-tunnel') {
+        const csrfError = CsrfProtection.middleware(request);
+        if (csrfError) return csrfError;
+    }
 
     // 2. 速率限制
     if (pathname.startsWith('/api/')) {
@@ -98,8 +101,14 @@ export async function middleware(request: NextRequest) {
         if (rateLimitResponse) return rateLimitResponse;
     }
 
-    // 拦截访问 /admin 或者 /api/admin/ 下的请求
-    if (pathname.startsWith('/admin') || pathname.startsWith('/api/admin')) {
+    // 拦截访问受保护的路径（管理员路径或用户私有路径）
+    const isAdminPath = pathname.startsWith('/admin') || pathname.startsWith('/api/admin');
+    const isUserPath = pathname.startsWith('/profile') || 
+                       pathname.startsWith('/history') || 
+                       pathname.startsWith('/favorites') ||
+                       pathname.startsWith('/api/user');
+
+    if (isAdminPath || isUserPath) {
         const token = request.cookies.get('access_token')?.value || request.headers.get("Authorization")?.split(" ")[1];
 
         if (!token) {
@@ -109,8 +118,8 @@ export async function middleware(request: NextRequest) {
         try {
             const { payload } = await jwtVerify(token, SECRET);
 
-            // 校验是否为管理员
-            if (payload.role !== 'admin') {
+            // 如果访问管理员路径，校验是否为管理员
+            if (isAdminPath && payload.role !== 'admin') {
                 return handleUnauthorized(request);
             }
         } catch {
@@ -119,14 +128,23 @@ export async function middleware(request: NextRequest) {
         }
     }
 
-    const response = NextResponse.next();
+    // ======= 3. Nonce CSP 安全机制注入 =======
+    const nonce = btoa(crypto.randomUUID());
+    const requestHeaders = new Headers(request.headers);
+    requestHeaders.set('x-nonce', nonce); // 供 Next.js 服务端组件与 <script> 标签抓取
+
+    const response = NextResponse.next({
+        request: {
+            headers: requestHeaders,
+        },
+    });
 
     // 2. 自动补充 CSRF Cookie（如果缺失）
     if (!request.cookies.has("XSRF-TOKEN")) {
         CsrfProtection.setCsrfCookie(response);
     }
 
-    return addSecurityHeaders(response);
+    return addSecurityHeaders(response, nonce);
 }
 
 /** 统一处理未授权访问 */
@@ -142,7 +160,17 @@ function handleUnauthorized(request: NextRequest) {
     }
 }
 
-// 仅对特定的一批路由启用中间件，减少公共请求的开销
+// 匹配所有请求路径，排除静态资源和 API 限流以外的特殊路径
 export const config = {
-    matcher: ['/admin/:path*', '/api/admin/:path*', '/:path*'],
+    matcher: [
+        /*
+         * 匹配所有路径，除了：
+         * - _next/static (静态文件)
+         * - _next/image (图片优化文件)
+         * - favicon.ico (图标)
+         * - 监控隧道 API
+         * - 各类静态资源和媒体文件
+         */
+        '/((?!_next/static|_next/image|favicon.ico|api/glitchtip-tunnel|.*\\.(?:svg|png|jpg|jpeg|gif|webp|woff|woff2|css|js|mp4|webm|mkv)$).*)',
+    ],
 };

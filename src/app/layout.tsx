@@ -1,6 +1,9 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import SentryInitializer from "@/components/monitoring/SentryInitializer";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
+
+export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
   title: {
@@ -24,6 +27,7 @@ export default function RootLayout({
   return (
     <html lang="zh-CN" suppressHydrationWarning className="dark">
       <body className="antialiased">
+        <SentryInitializer />
         <ErrorBoundary>
           {children}
         </ErrorBoundary>

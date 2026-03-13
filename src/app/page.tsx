@@ -6,7 +6,7 @@ import StaggeredList from "@/components/layout/StaggeredList";
 import Link from "next/link";
 import Image from "next/image";
 
-export const revalidate = 3600;
+export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
   let [featured] = await Promise.all([

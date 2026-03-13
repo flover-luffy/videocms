@@ -9,7 +9,9 @@ export async function GET() {
     // 存入缓存
     setCaptcha(captchaId, text);
 
-    console.log(`[CAPTCHA] Generating new captcha. ID: ${captchaId}, Text: ${text}`);
+    if (process.env.NODE_ENV === "development") {
+        console.log(`[CAPTCHA] Generating new captcha. ID: ${captchaId}, Text: ${text}`);
+    }
 
     const response = NextResponse.json({
         svg: data,

@@ -5,13 +5,6 @@
 import { SignJWT, jwtVerify } from "jose";
 import type { JwtPayload } from "@/types";
 
-if (!process.env.JWT_SECRET) {
-    if (process.env.NODE_ENV === "production") {
-        throw new Error("🚨 [FATAL] 生产环境中必须设置 JWT_SECRET!");
-    }
-    console.warn("⚠️ [SECURITY] 未配置 JWT_SECRET，使用弱密钥模式");
-}
-
 import { JWT_CONFIG } from "@/config";
 
 const SECRET = new TextEncoder().encode(JWT_CONFIG.SECRET);
@@ -26,8 +19,9 @@ export async function signAccessToken(payload: Omit<JwtPayload, "iat" | "exp">):
 }
 
 /** 签发刷新 Token */
-export async function signRefreshToken(payload: Omit<JwtPayload, "iat" | "exp">): Promise<string> {
-    return new SignJWT({ ...payload })
+export async function signRefreshToken(payload: Omit<JwtPayload, "iat" | "exp" | "jti">): Promise<string> {
+    const jti = crypto.randomUUID();
+    return new SignJWT({ ...payload, jti })
         .setProtectedHeader({ alg: "HS256" })
         .setIssuedAt()
         .setExpirationTime(JWT_CONFIG.REFRESH_TOKEN_TTL)

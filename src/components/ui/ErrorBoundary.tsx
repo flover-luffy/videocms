@@ -36,18 +36,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     componentDidCatch(error: Error, errorInfo: ErrorInfo): void {
         console.error("[ErrorBoundary] 捕获到渲染错误:", error, errorInfo);
 
-        // 如果 Sentry 已集成，自动上报
-        if (typeof window !== "undefined") {
-            import("@sentry/nextjs")
-                .then((Sentry) => {
-                    Sentry.captureException(error, {
-                        contexts: { react: { componentStack: errorInfo.componentStack ?? "" } },
-                    });
-                })
-                .catch(() => {
-                    // Sentry 未安装时静默忽略
-                });
-        }
+        // 如果需要其他监控逻辑，可以在此处扩展
     }
 
     /** 重置错误状态，允许用户重试 */

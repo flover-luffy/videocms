@@ -41,7 +41,9 @@ export async function POST(request: NextRequest) {
 
         // 1.5 图形验证码校验 (NEW)
         const captchaId = request.cookies.get('captcha_id')?.value;
-        console.log(`[VERIFY] Captcha check. ID from cookie: ${captchaId}, Input: ${captcha}`);
+        if (process.env.NODE_ENV === "development") {
+            console.log(`[VERIFY] Captcha check. ID from cookie: ${captchaId}, Input: ${captcha}`);
+        }
 
         if (!captchaId || !captcha || !validateCaptcha(captchaId, captcha)) {
             console.log(`[VERIFY] Captcha failed. Valid ID: ${!!captchaId}, Valid Input: ${!!captcha}`);

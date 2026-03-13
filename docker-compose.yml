@@ -21,6 +21,7 @@ services:
       # 注意：在容器内，连接宿主机的数据库可能需要使用 host.docker.internal 
       # 或者如果你希望 docker-compose 管理数据库容器，则使用下方 db 服务的名字
       - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-videocms}
+    command: ["sh", "-c", "prisma migrate deploy && prisma db seed && node server.js"]
     depends_on:
       db:
         condition: service_healthy
@@ -49,7 +50,7 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-videocms}
       TZ: Asia/Shanghai
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:

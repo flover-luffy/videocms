@@ -47,6 +47,15 @@ export default function MediaCard({ id, title, posterUrl, voteAverage, year, epi
                         </div>
                     )}
 
+                    {/* 类型角标：左上角 */}
+                    {(episodeCount !== undefined || true) && (
+                        <div className="absolute top-3 left-3 px-2 py-0.5 rounded-lg bg-black/40 backdrop-blur-md border border-white/10 z-20">
+                            <span className="text-[10px] font-black text-white/90 uppercase tracking-widest">
+                                {episodeCount === 1 ? "电影" : "剧集"}
+                            </span>
+                        </div>
+                    )}
+
                     {/* 底阴影光效 */}
                     <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-transparent opacity-40 group-hover:opacity-20 transition-opacity duration-700" />
                     <div className="absolute inset-0 rounded-[1.75rem] ring-1 ring-inset ring-white/10 pointer-events-none" />

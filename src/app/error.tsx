@@ -49,7 +49,7 @@ export default function GlobalError({
                     maxWidth: "480px",
                 }}
             >
-                {error.message || "服务器遇到了一个意外错误，请稍后再试。"}
+                服务器遇到了一个意外错误，请稍后再试。
             </p>
 
             {error.digest && (

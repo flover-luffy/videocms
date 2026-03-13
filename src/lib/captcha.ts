@@ -84,7 +84,9 @@ export function setCaptcha(captchaId: string, text: string) {
  */
 export function validateCaptcha(captchaId: string, userInput: string): boolean {
     const answer = captchaCache.get(captchaId);
-    console.log(`[CAPTCHA-LIB] Validating ID: ${captchaId}. Found answer in cache: ${answer}`);
+    if (process.env.NODE_ENV === "development") {
+        console.log(`[CAPTCHA-LIB] Validating ID: ${captchaId}. Found answer in cache: ${answer}`);
+    }
 
     if (!answer) return false;
 

@@ -13,6 +13,15 @@ export default function RegisterPage() {
     const [errorMsg, setErrorMsg] = useState("");
     const [countdown, setCountdown] = useState(0);
 
+    // 计算密码强度的规则满足情况
+    const passwordRules = [
+        { label: "至少 12 个字符", valid: formData.password.length >= 12 },
+        { label: "包含大写字母", valid: /[A-Z]/.test(formData.password) },
+        { label: "包含数字", valid: /[0-9]/.test(formData.password) },
+        { label: "包含特定特殊字符 (!@#$%^&*)", valid: /[!@#$%^&*]/.test(formData.password) }
+    ];
+    const isPasswordValid = passwordRules.every(r => r.valid);
+
     const fetchCaptcha = async () => {
         try {
             const res = await fetch('/api/auth/captcha', { cache: 'no-store' });
@@ -84,8 +93,8 @@ export default function RegisterPage() {
             setErrorMsg("两次输入的密码不一致");
             return;
         }
-        if (formData.password.length < 12) {
-            setErrorMsg("密码长度不能小于 12 位");
+        if (!isPasswordValid) {
+            setErrorMsg("密码不符合安全要求，请检查下方提示");
             return;
         }
 
@@ -208,11 +217,41 @@ export default function RegisterPage() {
                                 type="password"
                                 required
                                 className="form-input"
-                                placeholder="至少 12 位，含数字、大小写、特殊符号"
+                                placeholder="输入符合要求的安全密码"
                                 value={formData.password}
                                 onChange={(e) => setFormData((p) => ({ ...p, password: e.target.value }))}
-                                style={{ width: "100%", background: "var(--color-bg)", border: "1px solid var(--color-border)", borderRadius: "0.5rem", color: "var(--color-text)", padding: "0.75rem", outline: "none" }}
+                                style={{ width: "100%", background: "var(--color-bg)", border: "1px solid var(--color-border)", borderRadius: "0.5rem", color: "var(--color-text)", padding: "0.75rem", outline: "none", transition: "border-color 0.2s" }}
                             />
+                            {/* 密码强度实时反馈 */}
+                            {formData.password && (
+                                <div className="fade-in" style={{ display: "flex", flexDirection: "column", gap: "0.375rem", marginTop: "0.75rem" }}>
+                                    {passwordRules.map((rule, idx) => (
+                                        <div key={idx} style={{
+                                            display: "flex",
+                                            alignItems: "center",
+                                            gap: "0.5rem",
+                                            fontSize: "0.75rem",
+                                            color: rule.valid ? "#10b981" : "var(--color-muted)",
+                                            transition: "color 0.3s ease",
+                                        }}>
+                                            <span style={{
+                                                display: "inline-flex",
+                                                alignItems: "center",
+                                                justifyContent: "center",
+                                                width: "1.125rem",
+                                                height: "1.125rem",
+                                                borderRadius: "50%",
+                                                backgroundColor: rule.valid ? "rgba(16, 185, 129, 0.15)" : "transparent",
+                                                border: rule.valid ? "1px solid rgba(16, 185, 129, 0.3)" : "1px solid var(--color-border)",
+                                                transition: "all 0.3s ease"
+                                            }}>
+                                                {rule.valid ? "✓" : ""}
+                                            </span>
+                                            {rule.label}
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
                         </div>
 
                         <div style={{ marginBottom: "1.5rem" }}>

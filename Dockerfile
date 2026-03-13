@@ -4,7 +4,7 @@
 # ============================================================
 
 # ---------- 阶段 1：依赖安装 ----------
-FROM node:20-slim AS deps
+FROM node:22-slim AS deps
 
 WORKDIR /app
 
@@ -12,7 +12,13 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 
 # ---------- 阶段 2：构建 ----------
-FROM node:20-slim AS builder
+FROM node:22-slim AS builder
+
+# 安装构建所需的依赖
+RUN apt-get update && apt-get install -y openssl
+
+# 全局安装 Prisma 以便后续阶段拷贝，规避运行时安装的网络不确定性
+RUN npm install -g prisma@7.4.2 --unsafe-perm
 
 WORKDIR /app
 
@@ -23,19 +29,22 @@ RUN npm ci
 # 拷贝源码
 COPY . .
 
-# 生成 Prisma Client
-RUN npx prisma generate
+# 规避 Next.js 和 Prisma 在静态解析阶段必须要有 DB 连接串以及触发连接尝试的问题
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV DATABASE_URL="postgresql://postgres:postgres@localhost:5432/videocms?schema=public"
+ENV SKIP_ENV_VALIDATION=1
+ENV PRISMA_GENERATE_DATAPROXY=true
 
 # 构建 Next.js（standalone 模式）
-ENV NEXT_TELEMETRY_DISABLED=1
+RUN npx prisma generate
 RUN npm run build
 
 # ---------- 阶段 3：运行时 ----------
-FROM node:20-slim AS runner
+FROM node:22-slim AS runner
 
 # 安装运行时所需的最小依赖
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends curl && \
+    apt-get install -y --no-install-recommends curl openssl && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -47,14 +56,23 @@ RUN addgroup --system --gid 1001 nodejs && \
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 
-# 拷贝 standalone 构建产物
+# 补全运行时 Seed 所需依赖（Next.js standalone 模式不包含这些额外驱动）
+RUN npm install pg @prisma/adapter-pg bcryptjs dotenv --unsafe-perm
+
+# 拷贝构建产物及依赖
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 COPY --from=builder /app/public ./public
 
-# 拷贝 Prisma schema 和迁移文件（运行时需要）
+# 确保 Prisma 命令行工具可用：直接从 builder 阶段拷贝全局安装的包
+COPY --from=builder /usr/local/lib/node_modules /usr/local/lib/node_modules
+COPY --from=builder /usr/local/bin /usr/local/bin
+
+# 拷贝 Prisma 相关配置（运行时 migrate 需要）
+COPY --from=builder /app/prisma.config.js ./prisma.config.js
 COPY --from=builder /app/prisma/schema.prisma ./prisma/schema.prisma
 COPY --from=builder /app/prisma/migrations ./prisma/migrations
+COPY --from=builder /app/prisma/seed.ts ./prisma/seed.ts
 
 # 拷贝运维脚本
 COPY scripts ./scripts

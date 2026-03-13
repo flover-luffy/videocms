@@ -5,10 +5,7 @@ import { z } from "zod";
  */
 export const LoginSchema = z.object({
     email: z.string().email("无效的邮箱格式"),
-    password: z.string().min(12, "密码至少需要 12 位")
-        .regex(/[A-Z]/, "必须包含大写字母")
-        .regex(/[0-9]/, "必须包含数字")
-        .regex(/[!@#$%^&*]/, "必须包含特殊字符"),
+    password: z.string().min(1, "密码不能为空"),
 });
 
 export const RegisterSchema = z.object({
@@ -18,7 +15,6 @@ export const RegisterSchema = z.object({
         .regex(/[A-Z]/, "必须包含大写字母")
         .regex(/[0-9]/, "必须包含数字")
         .regex(/[!@#$%^&*]/, "必须包含特殊字符"),
-    role: z.enum(["admin", "user"]).optional().default("user"),
 });
 
 /**

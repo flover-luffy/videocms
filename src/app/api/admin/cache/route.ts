@@ -7,6 +7,8 @@ import { NextResponse } from "next/server";
 import { withApiHandler } from "@/lib/api-handler";
 import { cacheManager } from "@/lib/cache";
 
+export const dynamic = "force-dynamic";
+
 /**
  * 获取缓存统计信息
  */

@@ -39,16 +39,17 @@ export async function GET() {
     const memUsage = process.memoryUsage();
     const heapUsed = memUsage.heapUsed / 1024 / 1024; // MB
     const heapTotal = memUsage.heapTotal / 1024 / 1024; // MB
+    const rss = memUsage.rss / 1024 / 1024; // MB
+    
+    // 只有当 heapUsed 接近 heapTotal 且 RSS 已经很大时才报 warning
+    // 或者简单化：内存 warning 不应直接导致 503，除非数据库挂了
     checks.memory = {
-        status: heapUsed / heapTotal > 0.9 ? "warning" : "ok",
+        status: heapUsed / heapTotal > 0.95 ? "warning" : "ok",
         usage: Math.round(heapUsed),
         limit: Math.round(heapTotal),
     };
 
-    const overallStatus =
-        checks.database.status === "up" && checks.memory.status !== "warning"
-            ? "healthy"
-            : "unhealthy";
+    const overallStatus = checks.database.status === "up" ? "healthy" : "unhealthy";
 
     const response: HealthCheck = {
         status: overallStatus,

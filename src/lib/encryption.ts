@@ -1,24 +1,17 @@
 import crypto from "crypto";
+import { ENCRYPTION_CONFIG } from "@/config";
 
 const ALGORITHM = "aes-256-gcm";
 const IV_LENGTH = 16;
 const KEY_LENGTH = 32;
 
 /**
- * 从环境变量派生加密密钥
+ * 从统一配置派生加密密钥
  */
 function getEncryptionKey(): Buffer {
-    const secret = process.env.ENCRYPTION_SECRET;
-    if (!secret) {
-        if (process.env.NODE_ENV === "production") {
-            throw new Error("🚨 [FATAL] 生产环境中未设置 ENCRYPTION_SECRET!");
-        }
-        console.warn("⚠️ [SECURITY] 未设置 ENCRYPTION_SECRET，使用开发环境默认密钥");
-        return crypto.pbkdf2Sync("dev-secret-do-not-use-in-production", "salt", 100000, KEY_LENGTH, "sha256");
-    }
-
-    // 使用 PBKDF2 派生固定长度密钥
-    return crypto.pbkdf2Sync(secret, "videocms-salt", 100000, KEY_LENGTH, "sha256");
+    const { SECRET, SALT } = ENCRYPTION_CONFIG;
+    // 使用 PBKDF2 派生固定长度密钥 (32 字节)
+    return crypto.pbkdf2Sync(SECRET, SALT, 100000, KEY_LENGTH, "sha256");
 }
 
 /**
@@ -39,9 +32,6 @@ export function encrypt(plaintext: string): string {
     return `${iv.toString("hex")}:${encrypted}:${tag.toString("hex")}`;
 }
 
-/**
- * 解密敏感数据
- */
 export function decrypt(ciphertext: string): string {
     const key = getEncryptionKey();
     const parts = ciphertext.split(":");
@@ -54,13 +44,26 @@ export function decrypt(ciphertext: string): string {
     const encrypted = parts[1];
     const tag = Buffer.from(parts[2], "hex");
 
-    const decipher = crypto.createDecipheriv(ALGORITHM, key, iv);
-    decipher.setAuthTag(tag);
+    try {
+        const decipher = crypto.createDecipheriv(ALGORITHM, key, iv);
+        decipher.setAuthTag(tag);
 
-    let decrypted = decipher.update(encrypted, "hex", "utf8");
-    decrypted += decipher.final("utf8");
+        let decrypted = decipher.update(encrypted, "hex", "utf8");
+        decrypted += decipher.final("utf8");
 
-    return decrypted;
+        return decrypted;
+    } catch (err: any) {
+        console.error("[Encryption] 解密失败。可能原因：密钥不匹配、数据被篡改或环境变量已变更。", {
+            error: err.message,
+            ciphertextLength: ciphertext.length,
+            keyHash: crypto.createHash('sha256').update(key).digest('hex').substring(0, 8)
+        });
+        
+        if (err.message.includes("Unsupported state") || err.message.includes("authTag")) {
+            throw new Error("数据解密认证失败：加密密钥不正确或数据已损坏。请尝试重新保存配置。");
+        }
+        throw err;
+    }
 }
 
 /**

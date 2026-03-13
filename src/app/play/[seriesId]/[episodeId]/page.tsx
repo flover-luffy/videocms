@@ -56,7 +56,7 @@ export default function PlayPage({ params }: { params: Promise<{ seriesId: strin
                     <span className="text-blue-500 italic">第 {episode.episodeNum} 集</span>
                 </nav>
 
-                <div className="grid grid-cols-1 xl:grid-cols-[1fr_400px] gap-8 items-start">
+                <div className="grid grid-cols-1 xl:grid-cols-[1fr_400px] gap-8 items-stretch">
                     {/* 播放器主视窗 */}
                     <div className="space-y-8">
                         {/* 悬浮播放器便当盒 */}
@@ -157,7 +157,7 @@ export default function PlayPage({ params }: { params: Promise<{ seriesId: strin
                         </div>
                     </div>
 
-                    <aside className="xl:sticky xl:top-32 h-[400px] xl:h-[calc(100vh-160px)] xl:max-h-[850px] bento-card p-6 md:p-8 flex flex-col shadow-[0_20px_50px_#00000066]">
+                    <aside className="xl:sticky xl:top-32 bento-card p-6 md:p-8 flex flex-col shadow-[0_20px_50px_#00000066]">
                         {/* 固定的标题栏 */}
                         <div className="flex justify-between items-end shrink-0 mb-6 border-b border-white/10 pb-4">
                             <h2 className="text-xl font-black text-white tracking-widest flex items-center gap-2">

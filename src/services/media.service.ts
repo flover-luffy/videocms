@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { searchTmdbMetadata } from "@/lib/tmdb/client";
 import type { ScannedItem } from "@/types";
@@ -210,11 +211,11 @@ export class MediaService {
                 overview: meta.overview,
                 year: meta.year,
                 voteAverage: meta.voteAverage,
-                genres: (meta.genres as any) || [],
+                genres: (meta.genres as Prisma.InputJsonValue) || [],
                 type: meta.type,
-                director: meta.director || null,
-                cast: (meta.cast as any) || null,
-                tmdbData: (meta.tmdbData as any) || null
+                director: meta.director || undefined,
+                cast: (meta.cast as Prisma.InputJsonValue) || undefined,
+                tmdbData: (meta.tmdbData as Prisma.InputJsonValue) || undefined
             },
         });
     }

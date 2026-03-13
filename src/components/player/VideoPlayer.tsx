@@ -2,6 +2,8 @@
 
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import Artplayer from "artplayer";
+// @ts-ignore
+import artplayerPluginJassub from "artplayer-plugin-jassub";
 import Hls from "hls.js";
 import { motion, AnimatePresence } from "framer-motion";
 import { useRouter } from "next/navigation";
@@ -38,6 +40,7 @@ const VideoPlayer = ({
     const containerRef = useRef<HTMLDivElement>(null);
     const playerWrapperRef = useRef<HTMLDivElement>(null); // 新增：接管全屏显示的包装器
     const artRef = useRef<Artplayer | null>(null);
+    const isSeekingRef = useRef(false); // 新增：锁定拖拽状态
 
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -128,6 +131,14 @@ const VideoPlayer = ({
                     }
                 },
             },
+            plugins: [
+                artplayerPluginJassub({
+                    debug: false,
+                    workerUrl: '/libs/jassub/worker/jassub-worker.js',
+                    wasmUrl: '/libs/jassub/wasm/jassub-worker.wasm',
+                    modernWasmUrl: '/libs/jassub/wasm/jassub-worker-modern.wasm',
+                }),
+            ],
         });
 
         artRef.current = art;
@@ -146,8 +157,14 @@ const VideoPlayer = ({
             if (videoInfo.subtitles) {
                 for (const sub of videoInfo.subtitles) {
                     if (sub.url) {
-                        art.subtitle.url = sub.url;
-                        art.subtitle.show = true;
+                        const isAss = sub.url.toLowerCase().endsWith('.ass') || sub.url.toLowerCase().endsWith('.ssa');
+                        if (isAss) {
+                            // 使用插件切换 ASS 字幕
+                            (art.plugins as any).artplayerPluginJassub.switch(sub.url);
+                        } else {
+                            art.subtitle.url = sub.url;
+                            art.subtitle.show = true;
+                        }
                         break;
                     }
                 }
@@ -163,7 +180,11 @@ const VideoPlayer = ({
 
         art.on("video:play", () => setIsPlaying(true));
         art.on("video:pause", () => setIsPlaying(false));
-        art.on("video:timeupdate", () => setCurrentTime(art.currentTime));
+        art.on("video:timeupdate", () => {
+            if (!isSeekingRef.current) {
+                setCurrentTime(art.currentTime);
+            }
+        });
         art.on("video:loadedmetadata", () => setDuration(art.duration));
         art.on("video:volumechange", () => {
             setVolume(art.volume);
@@ -371,6 +392,10 @@ const VideoPlayer = ({
                                             setCurrentTime(val);
                                             if (artRef.current) artRef.current.currentTime = val;
                                         }}
+                                        onMouseDown={() => { isSeekingRef.current = true; }}
+                                        onMouseUp={() => { isSeekingRef.current = false; }}
+                                        onTouchStart={() => { isSeekingRef.current = true; }}
+                                        onTouchEnd={() => { isSeekingRef.current = false; }}
                                         className="absolute inset-0 opacity-0 cursor-pointer z-20"
                                     />
                                     <motion.div
@@ -525,7 +550,6 @@ const VideoPlayer = ({
                 .art-video-player .art-control-progress,
                 .art-video-player .art-layer-gradient,
                 .art-video-player .art-settings,
-                .art-video-player .art-info-panel,
                 .art-video-player .art-notice,
                 .art-video-player .art-mask {
                     display: none !important;
