@@ -211,7 +211,7 @@ const VideoPlayer = ({
             if (ct <= 10) return;
             localStorage.setItem(`vcms-progress-${episodeId}`, String(ct));
             // 使用 fetch 而非 fetchWithCsrf，静默处理失败（如未登录）
-            fetch("/api/play/progress", {
+            fetchWithCsrf("/api/play/progress", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ episodeId: parseInt(episodeId, 10), position: ct, duration: art.duration || 0 }),

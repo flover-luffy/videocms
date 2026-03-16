@@ -101,10 +101,14 @@ def main():
             f"cd {REMOTE_DEPLOY_DIR}",
             f"tar -xzf {SOURCE_TAR}",
             "docker compose -p videocms up -d --build",
+            # 1. 清理构建产生的冗余镜像（解决“无用依赖”问题）
+            "docker image prune -f",
+            # 2. 清理宿主机源码，仅保留运行时必须的 docker-compose.yml 和 .env
+            "echo '  > 正在移除云端源码以节省空间并增强安全性...'",
+            "find . -maxdepth 1 ! -name 'docker-compose.yml' ! -name '.env' ! -name '.' -exec rm -rf {} +",
             "echo '  > 正在等待服务启动以执行初始化...'",
             "sleep 10", # 给容器一点启动时间
-            "docker compose -p videocms exec -T app npx prisma db seed",
-            f"rm {SOURCE_TAR}" # 清理源码包
+            "docker compose -p videocms exec -T app npx prisma db seed"
         ]
         
         # 将命令合并，并确保每一个步骤成功才会继续
