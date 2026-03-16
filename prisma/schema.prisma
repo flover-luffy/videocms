@@ -2,7 +2,7 @@
 // learn more: https://pris.ly/d/prisma-schema
 
 generator client {
-  provider   = "prisma-client-js"
+  provider = "prisma-client-js"
 }
 
 datasource db {
@@ -109,14 +109,16 @@ model Track {
 
 // ── 用户 ──────────────────────────────────────────
 model User {
-  id           Int      @id @default(autoincrement())
-  email        String   @unique
-  passwordHash String
-  role         String   @default("user") // admin | user
-  createdAt    DateTime @default(now())
+  id                  Int       @id @default(autoincrement())
+  email               String    @unique
+  passwordHash        String
+  role                String    @default("user") // admin | user
+  tokenInvalidatedAt  DateTime? // 用于使所有旧 token 失效（密码重置、强制登出）
+  createdAt           DateTime  @default(now())
 
-  progress     WatchProgress[]
-  favorites    Favorite[]
+  progress            WatchProgress[]
+  favorites           Favorite[]
+  passwordResetTokens PasswordResetToken[]
 }
 
 // ── 观看进度(云端同步) ─────────────────────────────
@@ -197,4 +199,30 @@ model RevokedToken {
   createdAt DateTime @default(now())
 
   @@index([expiresAt])
+}
+
+// ── Token 黑名单 ──────────────────────────────────
+model TokenBlacklist {
+  id        Int      @id @default(autoincrement())
+  token     String   @unique
+  reason    String   // logout | password_reset | security
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([expiresAt])
+}
+
+// ── 密码重置令牌 ──────────────────────────────────
+model PasswordResetToken {
+  id        Int      @id @default(autoincrement())
+  token     String   @unique
+  expiresAt DateTime
+  used      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    Int
+
+  @@index([token])
+  @@index([userId])
 }

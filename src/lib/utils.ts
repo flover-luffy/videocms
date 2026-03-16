@@ -4,9 +4,9 @@
 
 /**
  * 规范化 Json 数组输出
- * 适配 SQLite 驱动可能返回 JSON 字符串或数组的情况
+ * 适配 Postgres 驱动可能返回 JSON 字符串或数组的情况
  */
-export function normalizeJsonArray(input: any): string[] {
+export function normalizeJsonArray(input: unknown): string[] {
     if (!input) return [];
     if (Array.isArray(input)) return input as string[];
 
@@ -26,7 +26,7 @@ export function normalizeJsonArray(input: any): string[] {
 /**
  * 安全解析 JSON (支持对象、字符串、Null)
  */
-export function safeJsonParse<T>(input: any, defaultValue: T): T {
+export function safeJsonParse<T>(input: unknown, defaultValue: T): T {
     if (input === null || input === undefined) return defaultValue;
     if (typeof input === "object" && !Array.isArray(input)) return input as T;
     if (typeof input === "string" && input.trim() !== "") {

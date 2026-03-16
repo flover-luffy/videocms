@@ -2,8 +2,6 @@
 
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import Artplayer from "artplayer";
-// @ts-ignore
-import artplayerPluginJassub from "artplayer-plugin-jassub";
 import Hls from "hls.js";
 import { motion, AnimatePresence } from "framer-motion";
 import { useRouter } from "next/navigation";
@@ -24,6 +22,13 @@ interface VideoInfo {
     poster?: string;
 }
 
+/** 播放列表条目（对应剧集单集简洁内容） */
+interface PlaylistItem {
+    id: string;
+    title?: string;
+    episodeNumber?: number;
+}
+
 const VideoPlayer = ({
     seriesId,
     episodeId,
@@ -31,7 +36,7 @@ const VideoPlayer = ({
 }: {
     seriesId: string;
     episodeId: string;
-    playlist: any[];
+    playlist: PlaylistItem[];
 }) => {
     const router = useRouter();
     const containerRef = useRef<HTMLDivElement>(null);
@@ -71,7 +76,10 @@ const VideoPlayer = ({
         return `${h > 0 ? h + ":" : ""}${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
     };
 
+    const isFetchingRef = useRef(false);
     const fetchPlayData = useCallback(async () => {
+        if (isFetchingRef.current) return;
+        isFetchingRef.current = true;
         setIsLoading(true);
         setError(null);
         try {
@@ -82,10 +90,11 @@ const VideoPlayer = ({
             }
             const data = await res.json();
             setVideoInfo(data);
-        } catch (err: any) {
-            setError(err.message);
+        } catch (err: unknown) {
+            setError(err instanceof Error ? err.message : "无法加载视频资源");
         } finally {
             setIsLoading(false);
+            isFetchingRef.current = false;
         }
     }, [episodeId]);
 
@@ -104,25 +113,11 @@ const VideoPlayer = ({
     useEffect(() => {
         if (!videoInfo || !containerRef.current) return;
 
-        // Monkey-patch Worker to support ESM worker loading for JASSUB
-        const OriginalWorker = window.Worker;
-        const JassubWorkerProxy = class extends OriginalWorker {
-            constructor(url: string | URL, options?: WorkerOptions) {
-                const urlString = url.toString();
-                // 只要是 jassub 相关的 worker，或者是 jassub 目录下的，都强制 ESM 模式
-                if (urlString.includes('jassub') || urlString.includes('worker')) {
-                    super(url, { 
-                        ...options, 
-                        type: 'module',
-                        credentials: 'same-origin' // 关键：允许带上 cookie 以绕过部分 WAF/EdgeOne 验证
-                    });
-                } else {
-                    super(url, options);
-                }
-            }
-        };
-        // @ts-ignore
-        window.Worker = JassubWorkerProxy;
+        // 使用第一个可用的字幕
+        const subs = videoInfo.subtitles || [];
+        const defaultSub = subs.find((s) => s.url);
+
+        console.log("[Player] Subtitle Configuration:", { defaultSub });
 
         const art = new Artplayer({
             container: containerRef.current,
@@ -138,14 +133,15 @@ const VideoPlayer = ({
             screenshot: true,
             fullscreen: false,
             moreVideoAttr: {
-                crossOrigin: "anonymous",
+                // 移除硬编码的 crossOrigin: "anonymous" 以适应不支持 CORS 的 CDN（如移动云盘）
             },
             subtitle: {
-                url: "",
+                url: defaultSub?.url || "",
                 type: "srt",
                 style: {
                     color: "#ffffff",
                     fontSize: "20px",
+                    textShadow: "0 0 4px rgba(0,0,0,0.8)",
                 },
                 encoding: "utf-8",
                 escape: false,
@@ -162,19 +158,12 @@ const VideoPlayer = ({
                     video.crossOrigin = "anonymous";
                 },
             },
-            plugins: [
-                artplayerPluginJassub({
-                    debug: false,
-                    workerUrl: "/libs/jassub/wasm/jassub-worker.js",
-                    wasmUrl: "/libs/jassub/wasm/jassub-worker.wasm",
-                    modernWasmUrl: "/libs/jassub/wasm/jassub-worker-modern.wasm",
-                }),
-            ],
         });
 
         artRef.current = art;
 
         art.on("ready", () => {
+            console.log("[Player] Artplayer ready.");
             const savedProgress = localStorage.getItem(`vcms-progress-${episodeId}`);
             if (savedProgress) art.currentTime = parseFloat(savedProgress);
             art.playbackRate = playbackSpeed;
@@ -184,35 +173,16 @@ const VideoPlayer = ({
                 containerRef.current.style.setProperty("--player-height", `${height}px`);
             }
 
-            // --- 字幕加载逻辑优化 ---
-            if (videoInfo.subtitles && videoInfo.subtitles.length > 0) {
-                // 找到第一个可用的字幕，优先尝试 ASS
-                const assSub = videoInfo.subtitles.find(s => s.url && (s.url.toLowerCase().endsWith('.ass') || s.url.toLowerCase().endsWith('.ssa')));
-                const srtSub = videoInfo.subtitles.find(s => s.url && !s.url.toLowerCase().endsWith('.ass') && !s.url.toLowerCase().endsWith('.ssa'));
-
-                const targetSub = assSub || srtSub;
-
-                if (targetSub && targetSub.url) {
-                    const isAss = targetSub.url.toLowerCase().endsWith('.ass') || targetSub.url.toLowerCase().endsWith('.ssa');
-                    if (isAss) {
-                        // 逻辑：如果是 ASS，启用 JASSUB 插件，并关闭原生字幕显示以防冲突
-                        art.subtitle.show = false;
-                        if ((art.plugins as any).artplayerPluginJassub) {
-                            (art.plugins as any).artplayerPluginJassub.switch(targetSub.url);
-                        }
-                    } else {
-                        // 逻辑：如果是 SRT/VTT，使用原生字幕
-                        art.subtitle.url = targetSub.url;
-                        art.subtitle.show = true;
-                    }
-                }
+            // 确保字幕可见
+            if (defaultSub?.url) {
+                art.subtitle.show = true;
             }
         });
 
         art.on("resize", () => {
             if (containerRef.current) {
                 const height = containerRef.current.clientHeight;
-                containerRef.current.style.setProperty('--player-height', `${height}px`);
+                containerRef.current.style.setProperty("--player-height", `${height}px`);
             }
         });
 
@@ -235,19 +205,21 @@ const VideoPlayer = ({
             }
         });
 
+        // 每 10 秒同步一次播放进度到后端（localStorage 始终保存，API 调用静默失败）
         const syncTimer = setInterval(() => {
             const ct = Math.floor(art.currentTime);
             if (ct <= 10) return;
             localStorage.setItem(`vcms-progress-${episodeId}`, String(ct));
-            fetchWithCsrf("/api/play/progress", {
+            // 使用 fetch 而非 fetchWithCsrf，静默处理失败（如未登录）
+            fetch("/api/play/progress", {
                 method: "POST",
-                body: JSON.stringify({ episodeId, position: ct, duration: art.duration || 0 }),
-            }).catch(() => { });
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ episodeId: parseInt(episodeId, 10), position: ct, duration: art.duration || 0 }),
+            }).catch(() => { /* 静默忽略：未登录或网络异常不影响播放 */ });
         }, 10000);
 
         return () => {
             clearInterval(syncTimer);
-            window.Worker = OriginalWorker;
             if (artRef.current) artRef.current.destroy();
         };
     }, [videoInfo, episodeId, nextEpisodeId, router, seriesId, autoNext, playbackSpeed]);
@@ -301,7 +273,7 @@ const VideoPlayer = ({
         if (!playerWrapperRef.current) return;
 
         if (!document.fullscreenElement) {
-            playerWrapperRef.current.requestFullscreen().catch(err => {
+            playerWrapperRef.current.requestFullscreen().catch((err) => {
                 console.error(`Fullscreen Error: ${err.message}`);
             });
         } else {
@@ -390,14 +362,14 @@ const VideoPlayer = ({
                                             <div className="flex items-center justify-between">
                                                 <span className="text-xs font-bold text-white/60">播放倍速</span>
                                                 <div className="flex gap-2">
-                                                    {[1, 1.25, 1.5, 2].map(s => (
+                                                    {[1, 1.25, 1.5, 2].map((s) => (
                                                         <button
                                                             key={s}
                                                             onClick={() => {
                                                                 setPlaybackSpeed(s);
                                                                 if (artRef.current) artRef.current.playbackRate = s;
                                                             }}
-                                                            className={`w-10 h-8 rounded-lg text-[10px] font-black transition-all ${playbackSpeed === s ? 'bg-blue-500 text-white shadow-lg shadow-blue-500/20' : 'bg-white/5 text-white/40 hover:bg-white/10'}`}
+                                                            className={`w-10 h-8 rounded-lg text-[10px] font-black transition-all ${playbackSpeed === s ? "bg-blue-500 text-white shadow-lg shadow-blue-500/20" : "bg-white/5 text-white/40 hover:bg-white/10"}`}
                                                         >
                                                             {s}x
                                                         </button>
@@ -531,7 +503,7 @@ const VideoPlayer = ({
                                             onClick={() => setShowSettings(!showSettings)}
                                             className={`w-10 h-10 flex items-center justify-center rounded-xl transition-all ${showSettings ? "text-blue-500 bg-blue-500/20 shadow-inner" : "text-white hover:bg-white/10"}`}
                                         >
-                                            <svg className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth="3" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M10.5 6h9.75M10.5 6a1.5 1.5 0 11-3 0m3 0a1.5 1.5 0 10-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 11-3 0m3 0a1.5 1.5 0 10-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 11-3 0m3 0a1.5 1.5 0 10-3 0m-9.75 0h9.75" /></svg>
+                                            <svg className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth="3" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M10.5 6h9.75M10.5 6a1.5 1.5 0 11-3 0m3 0a1.5 1.5 0 10-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 11-3 0m3 0a1.5 1.5 0 10-3 0m-3.75 0h9.75" /></svg>
                                         </button>
 
                                         <button

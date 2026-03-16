@@ -9,25 +9,31 @@ const globalForPrisma = globalThis as unknown as {
 
 const connectionString = process.env.DATABASE_URL;
 
-const pool = new Pool({ connectionString });
-const adapter = new PrismaPg(pool);
-
-export const prisma =
-  globalForPrisma.prisma ??
-  new PrismaClient({
-    adapter,
-    log:
-      process.env.NODE_ENV === "development"
-        ? ["query", "error", "warn"]
-        : ["error"],
+// 内部初始化函数
+function createPrismaClient() {
+  const pool = new Pool({ connectionString });
+  // @ts-ignore
+  const adapter = new PrismaPg(pool);
+  
+  return new PrismaClient({
+    adapter: adapter as any,
+    log: process.env.NODE_ENV === "development" ? ["query", "error", "warn"] : ["error"],
   });
-
-if (process.env.NODE_ENV !== "production") {
-  globalForPrisma.prisma = prisma;
 }
+
+export const prisma = new Proxy({} as PrismaClient, {
+  get(target, prop, receiver) {
+    if (!globalForPrisma.prisma) {
+      globalForPrisma.prisma = createPrismaClient();
+    }
+    return Reflect.get(globalForPrisma.prisma, prop, receiver);
+  }
+});
 
 // 优雅关闭
 process.on('beforeExit', async () => {
-  await prisma.$disconnect();
+  if (globalForPrisma.prisma) {
+    await globalForPrisma.prisma.$disconnect();
+  }
 });
 

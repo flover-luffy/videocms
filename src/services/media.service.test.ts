@@ -10,9 +10,16 @@ vi.mock('@/lib/db', () => ({
             findFirst: vi.fn(),
             create: vi.fn(),
             update: vi.fn(),
+            upsert: vi.fn(),
         },
         episode: {
             findMany: vi.fn(),
+            createMany: vi.fn(),
+        },
+        album: {
+            upsert: vi.fn(),
+        },
+        track: {
             createMany: vi.fn(),
         }
     }
@@ -29,9 +36,8 @@ describe('MediaService', () => {
     });
 
     it('当导入新剧集或电影时，应触发主对象与子集的级联新建', async () => {
-        // 空库情景
-        (prisma.series.findFirst as any).mockResolvedValue(null);
-        (prisma.series.create as any).mockResolvedValue({ id: 1, title: 'Test Series', type: 'tv' });
+        // 模拟 upsert 返回
+        (prisma.series.upsert as any).mockResolvedValue({ id: 1, title: 'Test Series', type: 'tv' });
         (prisma.episode.findMany as any).mockResolvedValue([]);
         // 拦截后台富化
         (searchTmdbMetadata as any).mockResolvedValue(null);
@@ -47,18 +53,18 @@ describe('MediaService', () => {
 
         expect(result.success).toBe(true);
         expect(result.newEpisodes).toBe(1);
-        expect(prisma.series.create).toHaveBeenCalled();
+        expect(prisma.series.upsert).toHaveBeenCalled();
         expect(prisma.episode.createMany).toHaveBeenCalledWith({
             data: expect.arrayContaining([
-                expect.objectContaining({ title: 'ep1.mp4', episodeNum: 1 }) // 推断逻辑
-            ])
+                expect.objectContaining({ title: 'ep1.mp4', episodeNum: 1 })
+            ]),
+            skipDuplicates: true
         });
     });
 
     it('当重复导入该剧集并新增子集时，主对象应执行合并，子集入库时能实现自跳过去的排重效果', async () => {
-        // 非空库情景：该剧集已存在
-        (prisma.series.findFirst as any).mockResolvedValue({ id: 1, title: 'Valid Series', type: 'tv' });
-        (prisma.series.update as any).mockResolvedValue({ id: 1, title: 'Valid Series', type: 'tv' });
+        // 模拟 upsert 返回
+        (prisma.series.upsert as any).mockResolvedValue({ id: 1, title: 'Valid Series', type: 'tv' });
         // 但该剧集数据库里目前只入库了 ep1
         (prisma.episode.findMany as any).mockResolvedValue([
             { openlistPath: '/tv/test/ep1.mp4' }
@@ -76,12 +82,13 @@ describe('MediaService', () => {
         });
 
         expect(result.success).toBe(true);
-        expect(result.newEpisodes).toBe(1); // ep1 被自动跳过了，ep2 新增入账
-        expect(prisma.series.update).toHaveBeenCalled();
+        expect(result.newEpisodes).toBe(1);
+        expect(prisma.series.upsert).toHaveBeenCalled();
         expect(prisma.episode.createMany).toHaveBeenCalledWith({
             data: expect.arrayContaining([
                 expect.objectContaining({ title: 'ep2.mp4' })
-            ])
+            ]),
+            skipDuplicates: true
         });
     });
 });

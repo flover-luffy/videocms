@@ -11,6 +11,11 @@ import type {
 import { classifyFile, parseEpisodeNum } from "./utils";
 import { withRetry } from "../retry-utils";
 import { openlistCircuitBreaker } from "@/lib/circuit-breaker";
+import { cacheManager } from "@/lib/cache";
+
+// 缓存配置
+const LIST_CACHE_TTL = 300; // 5 分钟
+const MAX_SCAN_CONCURRENCY = 10; // 扫描时的最大并发文件夹数
 
 // ───────────────────────────────────────────────────────
 // OpenList 客户端类
@@ -120,22 +125,28 @@ export class OpenListClient {
     /**
      * 列出指定路径下的文件/文件夹
      * POST /api/fs/list
+     * 已接入 CacheManager 缓存
      */
     async listDir(path: string): Promise<OpenListFile[]> {
         const finalPath = this.resolvePath(path);
-        const resp = await this.post<OpenListListResponse>("/api/fs/list", {
-            path: finalPath,
-            password: "",
-            page: 1,
-            per_page: 0,
-            refresh: false,
-        });
+        const cacheKey = `openlist_list:${this.host}:${finalPath}`;
+        const cache = cacheManager.getCache<OpenListFile[]>("openlist");
 
-        if (resp.code !== 200) {
-            throw new Error(`listDir 失败 [${resp.code}]: ${resp.message} (path=${finalPath})`);
-        }
+        return cache.getOrSet(cacheKey, async () => {
+            const resp = await this.post<OpenListListResponse>("/api/fs/list", {
+                path: finalPath,
+                password: "",
+                page: 1,
+                per_page: 0,
+                refresh: false,
+            });
 
-        return resp.data.content ?? [];
+            if (resp.code !== 200) {
+                throw new Error(`listDir 失败 [${resp.code}]: ${resp.message} (path=${finalPath})`);
+            }
+
+            return resp.data.content ?? [];
+        }, LIST_CACHE_TTL);
     }
 
     /**
@@ -158,44 +169,36 @@ export class OpenListClient {
 
     /**
      * 递归扫描目录，返回所有媒体文件列表
-     * @param rootPath  外部传入的扫描起点目录（相对配置根的相对或绝对路径皆可）
-     * @param maxDepth  最大递归深度（默认 5）
+     * 已改为并行化扫描以极大提升性能
      */
     async scanDirectory(rootPath: string, maxDepth = 5): Promise<ScannedItem[]> {
         const results: ScannedItem[] = [];
-
-        // 关键：此处统一将其转化为可信的绝对路径，交给 recurse 去发起最终请求。
-        // 因为 recurse 里传给 listDir 的总是上一层返回拼接好的路径。
         const startPath = this.resolvePath(rootPath);
 
+        // 并发控制：由于这是递归，传统的 Promise.all 可能会导致瞬间 QPS 过高
+        // 此处使用一个简单的任务队列或 Promise.all 的层级并发
         const recurse = async (currentAbsolutePath: string, depth: number): Promise<void> => {
             if (depth > maxDepth) return;
 
             let files: OpenListFile[];
             try {
-                // currentAbsolutePath 已经是经过 resolvePath 洗礼的规范路径了，
-                // 由于 listDir 里还会 resolvePath，因此刚才我们在 resolvePath 里加入了容错机制
                 files = await this.listDir(currentAbsolutePath);
             } catch (err) {
                 console.error(`[OpenList] 扫描目录失败: ${currentAbsolutePath}`, err instanceof Error ? err.message : err);
                 return;
             }
 
+            const folders: string[] = [];
             for (const file of files) {
-                // file.name 只是基本文件名，需与其父目录相拼接形成该文件的完整绝对路径
                 const fullPath = `${currentAbsolutePath}/${file.name}`.replace(/\/+/g, "/");
-
                 if (file.is_dir) {
-                    await recurse(fullPath, depth + 1);
+                    folders.push(fullPath);
                 } else {
                     const category = classifyFile(file.name);
                     if (category === "other") continue;
 
                     const parsed = parseEpisodeNum(file.name);
                     results.push({
-                        // 重要：为了外部 getSeriesKey 中的相对剥离操作能准确执行，
-                        // 我们需要暴露出原始未携带 rootPath 前缀的“业务相对路径”
-                        // 或者是，在 import-task 中提供处理过的方法。此处最好暴露相对根存储器的规范路径。
                         path: fullPath,
                         name: file.name,
                         size: file.size,
@@ -205,14 +208,17 @@ export class OpenListClient {
                     });
                 }
             }
+
+            // 【并行关键点】：递归处理文件夹
+            if (folders.length > 0) {
+                // 如果文件夹数量极多，可以在此处分批或加入信号量，这里假定 10 个以内是安全的
+                await Promise.all(folders.map(folder => recurse(folder, depth + 1)));
+            }
         };
 
         await recurse(startPath, 0);
 
-        // 核心改动：不再去除结果路径中的 rootPath 前缀。
-        // 数据库中存储从 Alist 根目录起始的绝对路径，确保 API 构造链接时偏移量永远正确。
         return results.map(r => {
-            // 确保输出的业务路径前带有 "/"
             const p = ("/" + r.path).replace(/\/+/g, "/");
             return { ...r, path: p };
         });

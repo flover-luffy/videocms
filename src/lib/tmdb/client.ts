@@ -5,7 +5,10 @@
 import PQueue from "p-queue";
 import { TMDB_CONFIG } from "@/config";
 import { tmdbCircuitBreaker } from "@/lib/circuit-breaker";
-import { tmdbMetadataCache } from "@/lib/cache";
+import { cacheManager } from "@/lib/cache";
+
+/** TMDB 元数据缓存（使用具名类型） */
+type TmdbCacheEntry = TmdbMetadata;
 
 const TMDB_BASE = TMDB_CONFIG.BASE_URL;
 const TMDB_IMAGE_BASE = TMDB_CONFIG.IMAGE_BASE_URL;
@@ -16,6 +19,9 @@ const queue = new PQueue({
     interval: TMDB_CONFIG.RATE_LIMIT.interval,
     intervalCap: TMDB_CONFIG.RATE_LIMIT.intervalCap
 });
+
+/** 具名类型缓存实例 */
+const tmdbMetadataCache = cacheManager.getCache<TmdbCacheEntry>('tmdbMetadata', 1000, 3600); // 1 小时
 
 interface TmdbSearchResult {
     id: number;
@@ -49,7 +55,7 @@ interface TmdbMetadata {
     genres: string[];
     cast?: string[] | null; // 原 string 改为 string[]
     director?: string | null;
-    tmdbData?: any;         // 原 string 改为 any
+    tmdbData?: Record<string, unknown>; // TMDB API 原始响应对象
 }
 
 const GENRE_MAP_EN_ZH: Record<string, string> = {
@@ -89,7 +95,7 @@ async function tmdbGet<T>(path: string): Promise<T> {
 export async function searchTmdbMetadata(title: string): Promise<TmdbMetadata | null> {
     // 尝试从缓存获取
     const cacheKey = `tmdb:${title}`;
-    const cached = tmdbMetadataCache.get(cacheKey);
+    const cached = await tmdbMetadataCache.get(cacheKey);
     if (cached !== null) {
         return cached as TmdbMetadata | null;
     }
@@ -153,7 +159,7 @@ export async function searchTmdbMetadata(title: string): Promise<TmdbMetadata | 
                 overview: detailResp.overview ?? "",
                 voteAverage: typeof detailResp.vote_average === 'number' ? Math.round(detailResp.vote_average * 10) / 10 : 0,
                 year: isNaN(year!) ? null : year,
-                genres: (Array.isArray(detailResp.genres) ? detailResp.genres : []).map((g: any) => GENRE_MAP_EN_ZH[String(g.name)] || String(g.name)).filter(Boolean),
+                genres: (Array.isArray(detailResp.genres) ? detailResp.genres : []).map((g: { name: string }) => GENRE_MAP_EN_ZH[g.name] || g.name).filter(Boolean),
                 cast: cast.length > 0 ? cast : null, // 直接存数组
                 director: director || null,
                 tmdbData: detailResp // 直接存对象
@@ -165,8 +171,7 @@ export async function searchTmdbMetadata(title: string): Promise<TmdbMetadata | 
             return result;
         } catch (err) {
             console.error(`[TMDB] 搜索元数据失败: ${title}`, err);
-            // 缓存 null 结果（避免重复请求失败的项）
-            tmdbMetadataCache.set(cacheKey, null, 300); // 5 分钟
+            // 搜索失败时不缓存，避免第一次临时故障导致永久封陎
             return null;
         }
     }) as Promise<TmdbMetadata | null>;

@@ -23,34 +23,25 @@ export class MediaService {
     }) {
         const normalizedSourcePath = normalizePath(sanitizePath(path));
 
-        // 尝试匹配：1. 路径匹配（主） 2. 标题匹配（辅，防止层级改变导致的重复）
-        const existing = await prisma.series.findFirst({
+        // 使用 upsert 确保原子性，解决并发扫描冲突
+        const series = await prisma.series.upsert({
             where: {
+                openlistConfigId_sourcePath: {
+                    openlistConfigId: configId,
+                    sourcePath: normalizedSourcePath
+                }
+            },
+            update: {
+                title: inferredTitle,
+                updatedAt: new Date()
+            },
+            create: {
+                title: inferredTitle,
+                sourcePath: normalizedSourcePath,
                 openlistConfigId: configId,
-                OR: [
-                    { sourcePath: normalizedSourcePath },
-                    { title: inferredTitle }
-                ]
+                type: videos.length === 1 ? "movie" : "tv",
             },
         });
-
-        const series = existing
-            ? await prisma.series.update({
-                where: { id: existing.id },
-                data: {
-                    title: inferredTitle,
-                    sourcePath: normalizedSourcePath, // 同步更新为最新规范路径
-                    updatedAt: new Date()
-                },
-            })
-            : await prisma.series.create({
-                data: {
-                    title: inferredTitle,
-                    sourcePath: normalizedSourcePath,
-                    openlistConfigId: configId,
-                    type: videos.length === 1 ? "movie" : "tv",
-                },
-            });
 
         // 规范化所有视频路径并记录
         const normalizedVideos = videos.map(v => ({
@@ -82,7 +73,10 @@ export class MediaService {
         }
 
         if (episodesToCreate.length > 0) {
-            await prisma.episode.createMany({ data: episodesToCreate });
+            await prisma.episode.createMany({
+                data: episodesToCreate,
+                skipDuplicates: true // 进一步防止并发导致的子资源冲突
+            });
         }
 
         // 异步富化元数据（不阻塞导入响应）
@@ -127,32 +121,24 @@ export class MediaService {
             }
         }
 
-        const existingAlbum = await prisma.album.findFirst({
+        // 使用 upsert 确保音频专辑原子化入库
+        const album = await prisma.album.upsert({
             where: {
+                openlistConfigId_sourcePath: {
+                    openlistConfigId: configId,
+                    sourcePath: normalizedSourcePath
+                }
+            },
+            update: {
+                coverUrl: coverUrl ?? undefined, // 仅在有新封面时更新
+            },
+            create: {
+                title: inferredTitle,
+                sourcePath: normalizedSourcePath,
                 openlistConfigId: configId,
-                OR: [
-                    { sourcePath: normalizedSourcePath },
-                    { title: inferredTitle }
-                ]
+                coverUrl,
             },
         });
-
-        const album = existingAlbum
-            ? await prisma.album.update({
-                where: { id: existingAlbum.id },
-                data: {
-                    coverUrl: coverUrl ?? existingAlbum.coverUrl,
-                    sourcePath: normalizedSourcePath
-                },
-            })
-            : await prisma.album.create({
-                data: {
-                    title: inferredTitle,
-                    sourcePath: normalizedSourcePath,
-                    openlistConfigId: configId,
-                    coverUrl,
-                },
-            });
 
         const normalizedAudios = audios.map(a => ({ ...a, path: normalizePath(a.path) }));
 
@@ -184,7 +170,10 @@ export class MediaService {
         }
 
         if (tracksToCreate.length > 0) {
-            await prisma.track.createMany({ data: tracksToCreate });
+            await prisma.track.createMany({
+                data: tracksToCreate,
+                skipDuplicates: true
+            });
         }
 
         return {

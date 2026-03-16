@@ -52,17 +52,18 @@ export function decrypt(ciphertext: string): string {
         decrypted += decipher.final("utf8");
 
         return decrypted;
-    } catch (err: any) {
+    } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
         console.error("[Encryption] 解密失败。可能原因：密钥不匹配、数据被篡改或环境变量已变更。", {
-            error: err.message,
+            error: message,
             ciphertextLength: ciphertext.length,
             keyHash: crypto.createHash('sha256').update(key).digest('hex').substring(0, 8)
         });
         
-        if (err.message.includes("Unsupported state") || err.message.includes("authTag")) {
+        if (message.includes("Unsupported state") || message.includes("authTag")) {
             throw new Error("数据解密认证失败：加密密钥不正确或数据已损坏。请尝试重新保存配置。");
         }
-        throw err;
+        throw err instanceof Error ? err : new Error(message);
     }
 }
 

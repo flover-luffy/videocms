@@ -99,6 +99,12 @@ export default function LoginPage() {
                         </button>
                     </form>
 
+                    <div style={{ textAlign: "center", marginTop: "1rem", fontSize: "0.875rem" }}>
+                        <Link href="/forgot-password" style={{ color: "var(--color-primary)", fontWeight: 600 }}>
+                            忘记密码？
+                        </Link>
+                    </div>
+
                     <p style={{ textAlign: "center", marginTop: "1.5rem", fontSize: "0.875rem", color: "var(--color-muted)" }}>
                         还没有账号？{" "}
                         <Link href="/register" style={{ color: "var(--color-primary)", fontWeight: 600 }}>

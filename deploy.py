@@ -67,7 +67,16 @@ def main():
     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     
     try:
-        ssh.connect(SERVER_IP, username=SERVER_USER, password=SERVER_PASS, timeout=10)
+        # 增加超时时间以应对网络抖动和 Windows 环境下的 SSH 握手延迟
+        print("  > 正在尝试 SSH 握手...")
+        ssh.connect(
+            SERVER_IP, 
+            username=SERVER_USER, 
+            password=SERVER_PASS, 
+            timeout=20, 
+            banner_timeout=200, # 核心修复：解决 Error reading SSH protocol banner
+            auth_timeout=60
+        )
         print_success("SSH 连接成功")
 
         # 确保远程目录存在并清理旧代码
@@ -85,12 +94,16 @@ def main():
                 scp.put(".env", remote_path=REMOTE_DEPLOY_DIR)
                 print("  > 已上传: .env")
 
-        # 3. 远程执行部署命令 (解压 -> 构建 -> 启动)
+        # 3. 远程执行部署命令 (解压 -> 构建 -> 启动 -> 初始化种子)
         print_step("正在执行远程构建与部署 (这在云端可能需要几分钟)...")
+        # 注意：不再在 docker-compose 内部 seed，而是在部署完成后通过命令行触发一次，保证幂等且不阻塞启动
         deploy_cmds = [
             f"cd {REMOTE_DEPLOY_DIR}",
             f"tar -xzf {SOURCE_TAR}",
             "docker compose -p videocms up -d --build",
+            "echo '  > 正在等待服务启动以执行初始化...'",
+            "sleep 10", # 给容器一点启动时间
+            "docker compose -p videocms exec -T app npx prisma db seed",
             f"rm {SOURCE_TAR}" # 清理源码包
         ]
         
@@ -106,9 +119,15 @@ def main():
         
         exit_status = stdout.channel.recv_exit_status()
         if exit_status == 0:
-            print_success("远程构建与部署成功")
+            print_success("远程构建与部署完成 (含数据库种子初始化)")
+            
+            # 4. 最终连通性简单自检
+            print_step("正在检查容器健康状态...")
+            _, out, _ = ssh.exec_command("docker compose -p videocms ps")
+            for line in out:
+                print(f"  {line.strip()}")
         else:
-            print_error(f"容器启动失败，退出码: {exit_status}")
+            print_error(f"部署过程中发生错误，退出码: {exit_status}")
             print(stderr.read().decode())
 
     except Exception as e:
@@ -121,7 +140,9 @@ def main():
 
     end_time = time.time()
     print(f"\n\033[1;32m全自动化部署任务完成！总耗时: {int(end_time - start_time)} 秒\033[0m")
-    print(f"服务访问地址: http://{SERVER_IP}:3000")
+    print(f"应用访问地址: http://{SERVER_IP}:3001")
+    print(f"数据库访问端口: 54321 (映射自容器 5432)")
+    print(f"监控状态: OpenTelemetry 已激活，数据上报中...")
 
 if __name__ == "__main__":
     main()

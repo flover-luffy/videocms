@@ -101,30 +101,26 @@ export async function runImportTask(configId: number, path: string, manualTitle?
     }
 
     // ── 情况 B: 影视导入（支持多剧集拆分） ──
-    const results = [];
-    let totalEpisodes = 0;
-
-    for (const [key, group] of groups.entries()) {
-        if (group.videos.length === 0) continue;
-
+    const groupEntries = Array.from(groups.entries()).filter(([_, g]) => g.videos.length > 0);
+    
+    // 【并行关键点】：使用 Promise.all 并行处理不同的剧集分组
+    const results = await Promise.all(groupEntries.map(async ([key, group]) => {
         let currentTitle = key === "__ROOT__"
             ? (sanitizedTitle ?? path.split("/").filter(Boolean).pop() ?? "未命名剧集")
             : key.split("/").filter(Boolean).pop() || "未命名剧集";
 
         currentTitle = cleanSeriesTitle(currentTitle);
-
         const currentPath = key === "__ROOT__" ? normalizePath(path) : key;
 
-        const data = await MediaService.importSeries({
+        return MediaService.importSeries({
             inferredTitle: currentTitle,
             path: currentPath,
             configId: configId,
             videos: group.videos,
         });
+    }));
 
-        results.push(data);
-        totalEpisodes += data.newEpisodes || 0;
-    }
+    const totalEpisodes = results.reduce((sum, res) => sum + (res.newEpisodes || 0), 0);
 
     return {
         success: true,

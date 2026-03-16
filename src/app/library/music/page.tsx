@@ -27,7 +27,10 @@ export default function MusicLibraryPage() {
                     setError(data.error);
                 }
             })
-            .catch(() => setError("网络请求失败"))
+            .catch((error) => {
+                console.error("[MusicLibrary] 获取专辑列表失败:", error);
+                setError("网络请求失败");
+            })
             .finally(() => setLoading(false));
     }, []);
 

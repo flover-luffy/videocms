@@ -5,22 +5,40 @@ import Link from "next/link";
 import VideoPlayer from "@/components/player/VideoPlayerWrapper";
 import PageLayout from "@/components/layout/PageLayout";
 import { normalizeJsonArray } from "@/lib/utils";
-import { useEffect, useState } from "react";
+import { useEffect, useState, use } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import FavoriteButton from "@/components/ui/FavoriteButton";
 
+/** 剪辑的十平反应类型，对应后端 /api/play/page-data 返回结构 */
+interface SeriesInfo {
+    id: number;
+    title: string;
+    overview?: string;
+    voteAverage?: number;
+    year?: number | null;
+    genres?: unknown;
+    cast?: unknown;
+    posterUrl?: string;
+}
+
+interface EpisodeItem {
+    id: number;
+    episodeNum: number;
+    series?: SeriesInfo;
+}
+
 interface PlayData {
-    episode: any;
-    allEpisodes: any[];
+    episode: EpisodeItem;
+    allEpisodes: EpisodeItem[];
 }
 
 export default function PlayPage({ params }: { params: Promise<{ seriesId: string; episodeId: string }> }) {
+    const { seriesId, episodeId } = use(params);
     const [data, setData] = useState<PlayData | null>(null);
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
         const load = async () => {
-            const { seriesId, episodeId } = await params;
             const res = await fetch(`/api/play/page-data?seriesId=${seriesId}&episodeId=${episodeId}`);
             if (res.ok) {
                 const playData = await res.json();
@@ -31,18 +49,20 @@ export default function PlayPage({ params }: { params: Promise<{ seriesId: strin
             setLoading(false);
         };
         load();
-    }, [params]);
+    }, [seriesId, episodeId]);
 
     const [isExpanded, setIsExpanded] = useState(false);
 
-    const { episode, allEpisodes } = data || { episode: null, allEpisodes: [] };
-    const series = episode?.series;
-    const genres = series ? normalizeJsonArray(series.genres) : [];
-
-    const isLongDescription = Boolean(series?.overview && series.overview.length > 120);
-
     if (loading) return <div className="min-h-screen bg-[#010204]" />;
     if (!data) return notFound();
+
+    const { episode, allEpisodes } = data;
+    // 安全守卫：如果 episode 或其对应的 series 信息不存在，则跳转 404
+    const series = episode?.series;
+    if (!episode || !series) return notFound();
+
+    const genres = normalizeJsonArray(series.genres);
+    const isLongDescription = Boolean(series.overview && series.overview.length > 120);
 
     return (
         <PageLayout maxWidth="1700px">
@@ -62,9 +82,10 @@ export default function PlayPage({ params }: { params: Promise<{ seriesId: strin
                         {/* 悬浮播放器便当盒 */}
                         <div className="bento-card p-2 md:p-4 relative">
                             <div className="relative rounded-[2rem] overflow-hidden bg-black shadow-inner ring-1 ring-white/10">
-                                <VideoPlayer seriesId={series.id} episodeId={episode.id} playlist={allEpisodes} />
+                                <VideoPlayer seriesId={String(series.id)} episodeId={String(episode.id)} playlist={allEpisodes.map(ep => ({ id: String(ep.id), episodeNumber: ep.episodeNum }))} />
                             </div>
                         </div>
+
 
                         <aside className="bento-card p-6 md:p-8 flex flex-col shadow-[0_20px_50px_#00000066]">
                             {/* 固定的标题栏 */}
@@ -178,7 +199,7 @@ export default function PlayPage({ params }: { params: Promise<{ seriesId: strin
                                     <div className="grid grid-cols-[70px_1fr] items-baseline gap-6 group/meta">
                                         <span className="text-[12px] font-black text-slate-200 tracking-widest shrink-0">主演阵容</span>
                                         <div className="flex flex-wrap gap-x-2 gap-y-1 text-[12px] font-bold text-slate-200 leading-normal">
-                                            {normalizeJsonArray(series.cast).slice(0, 3).map((c: string, idx: number, arr: any[]) => (
+                                            {normalizeJsonArray(series.cast).slice(0, 3).map((c: string, idx: number, arr: string[]) => (
                                                 <span key={idx}>
                                                     {c}{idx < arr.length - 1 ? "、" : ""}
                                                 </span>

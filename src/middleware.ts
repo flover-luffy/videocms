@@ -80,11 +80,8 @@ export async function middleware(request: NextRequest) {
     const { pathname } = request.nextUrl;
 
     // 1. CSRF 防护校验（针对 POST/PUT/DELETE/PATCH）
-    // 特殊：豁免监控隧道，因为它无法携带自定义 CSRF Header
-    if (pathname !== '/api/glitchtip-tunnel') {
-        const csrfError = CsrfProtection.middleware(request);
-        if (csrfError) return csrfError;
-    }
+    const csrfError = CsrfProtection.middleware(request);
+    if (csrfError) return csrfError;
 
     // 2. 速率限制
     if (pathname.startsWith('/api/')) {
@@ -144,7 +141,7 @@ export async function middleware(request: NextRequest) {
         CsrfProtection.setCsrfCookie(response);
     }
 
-    return addSecurityHeaders(response, nonce);
+    return addSecurityHeaders(response, nonce, pathname);
 }
 
 /** 统一处理未授权访问 */
@@ -168,9 +165,8 @@ export const config = {
          * - _next/static (静态文件)
          * - _next/image (图片优化文件)
          * - favicon.ico (图标)
-         * - 监控隧道 API
          * - 各类静态资源和媒体文件
          */
-        '/((?!_next/static|_next/image|favicon.ico|api/glitchtip-tunnel|.*\\.(?:svg|png|jpg|jpeg|gif|webp|woff|woff2|css|js|mp4|webm|mkv)$).*)',
+        '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|woff|woff2|css|js|mp4|webm|mkv)$).*)',
     ],
 };

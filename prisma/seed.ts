@@ -14,7 +14,8 @@ dotenv.config();
 
 const connectionString = process.env.DATABASE_URL;
 const pool = new Pool({ connectionString });
-const adapter = new PrismaPg(pool);
+// 巧妙利用 ConstructorParameters 绕过多个 @types/pg 副本导致的标志类型冲突
+const adapter = new PrismaPg(pool as unknown as ConstructorParameters<typeof PrismaPg>[0]);
 
 const prisma = new PrismaClient({ adapter });
 

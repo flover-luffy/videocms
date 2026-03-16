@@ -12,7 +12,7 @@ config({ path: path.resolve(process.cwd(), ".env") });
 // 核心环境变量列表
 const REQUIRED_ENVS = ["JWT_SECRET", "ENCRYPTION_SECRET", "DATABASE_URL"] as const;
 
-// ====== 生产环境执行期强制校验（自动放行 Docker 构建期预扫描） ======
+// ==== 强制安全防线（生产环境防呆设计） ====
 // 构建期标识判定：命令行含有 build、存在 NEXT_PHASE、或 CI 标识
 const commandArgs = process.argv.join(' ');
 const isBuild =
@@ -23,11 +23,24 @@ const isBuild =
     process.env.CI === 'true' ||
     process.env.NODE_ENV !== "production"; // 非纯后端运行时的豁免
 
+// 生产环境禁用的保留弱密钥（若检测到它们，直接 Crash 服务防止漏洞）
+const VULNERABLE_SECRETS = [
+    "fallback-dev-secret-do-not-use-in-production",
+    "fallback-secret"
+];
+
 if (process.env.NODE_ENV === "production" && !isBuild) {
     for (const key of REQUIRED_ENVS) {
         if (!process.env[key]) {
             throw new Error(`🚨 [FATAL] 生产环境缺少关键配置项: ${key}`);
         }
+    }
+    // 防止以默认弱密钥静默上线
+    if (VULNERABLE_SECRETS.includes(process.env.JWT_SECRET || "")) {
+        throw new Error(`🚨 [FATAL] 生产环境严禁使用默认 JWT_SECRET，必须在 .env 中重新生成!`);
+    }
+    if (VULNERABLE_SECRETS.includes(process.env.ENCRYPTION_SECRET || "")) {
+        throw new Error(`🚨 [FATAL] 生产环境严禁使用默认 ENCRYPTION_SECRET，必须在 .env 中重新生成!`);
     }
 } else if (!isBuild) {
     // 开发环境友好警告
@@ -38,10 +51,6 @@ if (process.env.NODE_ENV === "production" && !isBuild) {
     }
 }
 
-// Sentry (GlitchTip) 配置
-export const SENTRY_CONFIG = {
-    DSN: process.env.NEXT_PUBLIC_SENTRY_DSN || "https://placeholder@app.glitchtip.com/1",
-} as const;
 
 // ========== 配置常量 ==========
 
@@ -79,6 +88,10 @@ export const RATE_LIMIT_CONFIG = {
     API: {
         maxRequests: parseInt(process.env.RATE_LIMIT_API_MAX || "30", 10),
         windowMs: parseInt(process.env.RATE_LIMIT_API_WINDOW || String(60 * 1000), 10),
+    },
+    AUTH: {
+        maxRequests: parseInt(process.env.RATE_LIMIT_AUTH_MAX || "5", 10), // 限制极严
+        windowMs: parseInt(process.env.RATE_LIMIT_AUTH_WINDOW || String(60 * 1000), 10),
     },
 } as const;
 

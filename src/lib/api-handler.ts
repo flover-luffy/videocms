@@ -65,13 +65,19 @@ export function withApiHandler<T = unknown>(
                 timeout,
                 `请求超时（${timeout}ms）`
             );
-        } catch (error: any) {
-            console.error("[API ERROR DEPTH]", {
-                message: error.message,
-                stack: error.stack,
-                cause: error.cause,
-                details: error
-            });
+        } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : "Internal Server Error";
+            const stack = error instanceof Error ? error.stack : undefined;
+            const cause = error instanceof Error ? (error as Error & { cause?: unknown }).cause : undefined;
+            const code = (error as { code?: string })?.code;
+
+            // 开发环境记录详细错误信息
+            if (process.env.NODE_ENV === "development") {
+                console.error("[API ERROR]", { message, stack, cause });
+            } else {
+                // 生产环境只记录错误消息
+                console.error("[API ERROR]", message);
+            }
 
             // 1. 优先处理类型化业务错误
             if (error instanceof AppError) {
@@ -79,15 +85,14 @@ export function withApiHandler<T = unknown>(
             }
 
             // 2. Prisma 记录不存在
-            if (error?.code === 'P2025') {
+            if (code === 'P2025') {
                 return NextResponse.json({ error: "请求的资源不存在" }, { status: 404 });
             }
 
-            // 3. 开发环境返回具体消息
+            // 3. 开发环境返回具体消息，生产环境返回通用消息
             const isDev = process.env.NODE_ENV !== "production";
             return NextResponse.json({ 
-                error: isDev ? (error.message || "Internal Server Error") : "Internal Server Error",
-                stack: isDev ? error.stack : undefined
+                error: isDev ? message : "Internal Server Error"
             }, { status: 500 });
         }
     };

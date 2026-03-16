@@ -14,6 +14,7 @@ import type { PlayUrlResult } from "@/types";
 import { withApiHandler } from "@/lib/api-handler";
 import { verifyToken } from "@/lib/auth/jwt";
 import { getClientIp } from "@/lib/server-utils";
+import { withRetry } from "@/lib/retry-utils";
 
 
 export const GET = withApiHandler(async (
@@ -64,20 +65,26 @@ export const GET = withApiHandler(async (
     const subtitles: PlayUrlResult["subtitles"] = [];
 
     try {
-        const fileInfo = await client.getFile(episode.openlistPath);
+        // 【重试增强】：关键的直链获取增加 3 次自动重试
+        const fileInfo = await withRetry(async () => {
+            return await client.getFile(episode.openlistPath);
+        }, { maxRetries: 3, baseDelay: 500 });
+
         rawUrl = fileInfo.raw_url;
         url = client.getProxyUrl(episode.openlistPath, fileInfo.sign);
 
         // ── 字幕关联逻辑 ──
-        // 获取父目录及视频基础名（不含后缀）
         const lastSlash = episode.openlistPath.lastIndexOf("/");
         const parentPath = lastSlash >= 0 ? episode.openlistPath.substring(0, lastSlash) : "/";
         const fileName = episode.openlistPath.split("/").pop() || "";
         const baseName = fileName.lastIndexOf(".") >= 0 ? fileName.substring(0, fileName.lastIndexOf(".")) : fileName;
 
-        // 获取目录列表扫描同名字幕
-        const dirFiles = await client.listDir(parentPath);
-        const subtitleExts = [".srt", ".vtt", ".ass"];
+        // 【重试增强】：扫描同一目录下的字幕文件
+        const dirFiles = await withRetry(async () => {
+            return await client.listDir(parentPath);
+        }, { maxRetries: 2, baseDelay: 300 }).catch(() => [] as any[]);
+
+        const subtitleExts = [".srt", ".vtt"];
 
         for (const f of dirFiles) {
             if (f.is_dir) continue;
@@ -86,26 +93,33 @@ export const GET = withApiHandler(async (
             const ext = f.name.slice(extDot).toLowerCase();
             const nameWithoutExt = f.name.slice(0, extDot);
 
-            // 匹配条件：扩展名正确 且 基础名相同（或者是基础名开头，如 EP01.zh.srt）
             if (subtitleExts.includes(ext) && nameWithoutExt.startsWith(baseName)) {
                 try {
-                    // 调用 getFile 获取真实 sign，而非依赖目录列表（目录列表 sign 可能为空）
+                    // 获取字幕的具体 sign
                     const subtitlePath = `${parentPath}/${f.name}`;
-                    const subInfo = await client.getFile(subtitlePath);
+                    const subInfo = await withRetry(async () => {
+                        return await client.getFile(subtitlePath);
+                    }, { maxRetries: 2, baseDelay: 200 });
+
+                    let subUrl = client.getProxyUrl(subtitlePath, subInfo.sign);
+                    if (!subUrl.includes(":0")) subUrl += ":0";
+
                     subtitles.push({
-                        url: client.getProxyUrl(subtitlePath, subInfo.sign),
+                        url: subUrl,
                         name: f.name,
-                        type: ext.slice(1) as "srt" | "vtt" | "ass",
+                        type: ext.slice(1) as "srt" | "vtt",
                     });
                 } catch {
-                    // 单个字幕获取失败不影响视频播放
                     console.warn(`[PlayAPI] 字幕文件获取失败，跳过: ${f.name}`);
                 }
             }
         }
     } catch (err) {
-        console.error("[PlayAPI] 获取资源失败:", err);
-        return NextResponse.json({ error: "获取视频资源失败，请稍后重试" }, { status: 502 });
+        console.error("[PlayAPI] 获取资源失败 (已重试):", err);
+        return NextResponse.json({ 
+            error: "由于存储服务器响应超时，获取视频资源失败。建议检查 AList 配置或 CORS 设置。",
+            details: err instanceof Error ? err.message : String(err)
+        }, { status: 502 });
     }
 
     const result: PlayUrlResult = {

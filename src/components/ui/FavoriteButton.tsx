@@ -25,7 +25,11 @@ export default function FavoriteButton({ seriesId }: { seriesId: number }) {
                     setIsFavorite(found);
                 }
             })
-            .catch(() => { });
+            .catch((error) => {
+                console.error("[FavoriteButton] 获取收藏状态失败:", error);
+                // 失败时设置为未收藏状态
+                setIsFavorite(false);
+            });
     }, [seriesId]);
 
     const toggleFavorite = async () => {

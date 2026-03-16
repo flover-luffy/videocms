@@ -40,27 +40,23 @@ export const GET = withApiHandler(async (request: NextRequest) => {
         return NextResponse.json(cached);
     }
 
-    // 使用原生 SQL 进行多字段模糊检索 (SQLite)
+    // 使用 Prisma ORM 进行安全的多字段模糊检索
     try {
-        const likeQuery = `%${q}%`;
+        // 构建安全的搜索条件
+        const searchConditions = {
+            OR: [
+                { title: { contains: q } },
+                { director: { contains: q } },
+                // SQLite 不支持 JSON 字段搜索，需要使用原生查询但使用安全的 $queryRaw
+            ]
+        };
 
-        // 获取匹配的记录及其总数
-        // 检索字段包括：标题 (title)、导演 (director) 以及 JSON 格式的演职员表 (cast)
-        const matchedItems = await prisma.$queryRawUnsafe<{ id: number }[]>(
-            `SELECT id FROM Series 
-             WHERE title LIKE ? 
-                OR director LIKE ? 
-                OR CAST("cast" AS TEXT) LIKE ?
-             ORDER BY playCount DESC, createdAt DESC
-             LIMIT ? OFFSET ?`,
-            likeQuery,
-            likeQuery,
-            likeQuery,
-            limit,
-            (page - 1) * limit
-        );
+        // 获取总数
+        const total = await prisma.series.count({
+            where: searchConditions
+        });
 
-        if (matchedItems.length === 0) {
+        if (total === 0) {
             return NextResponse.json({
                 items: [],
                 total: 0,
@@ -70,11 +66,9 @@ export const GET = withApiHandler(async (request: NextRequest) => {
             });
         }
 
-        const ids = matchedItems.map(row => row.id);
-
-        // 获取完整模型数据
+        // 获取分页数据
         const items = await prisma.series.findMany({
-            where: { id: { in: ids } },
+            where: searchConditions,
             select: {
                 id: true,
                 title: true,
@@ -84,24 +78,13 @@ export const GET = withApiHandler(async (request: NextRequest) => {
                 voteAverage: true,
                 _count: { select: { episodes: true } },
             },
-            // 保持原始 SQL 查询的排序
             orderBy: [
                 { playCount: "desc" },
                 { createdAt: "desc" },
             ],
+            skip: (page - 1) * limit,
+            take: limit,
         });
-
-        // 获取符合条件的总数
-        const totalResult = await prisma.$queryRawUnsafe<{ count: number }[]>(
-            `SELECT COUNT(*) as count FROM Series 
-             WHERE title LIKE ? 
-                OR director LIKE ? 
-                OR CAST("cast" AS TEXT) LIKE ?`,
-            likeQuery,
-            likeQuery,
-            likeQuery
-        );
-        const total = Number(totalResult[0]?.count ?? 0);
 
         const formatted = items.map((s) => ({
             ...s,

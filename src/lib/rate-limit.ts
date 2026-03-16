@@ -81,4 +81,9 @@ export const RATE_LIMITS = {
         maxRequests: RATE_LIMIT_CONFIG.API.maxRequests, 
         windowMs: RATE_LIMIT_CONFIG.API.windowMs 
     },
+    // 认证相关（登录、找回密码等）
+    auth: {
+        maxRequests: RATE_LIMIT_CONFIG.AUTH.maxRequests,
+        windowMs: RATE_LIMIT_CONFIG.AUTH.windowMs
+    },
 };

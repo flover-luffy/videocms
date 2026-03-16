@@ -11,7 +11,7 @@ services:
       dockerfile: Dockerfile
     container_name: videocms_app
     ports:
-      - "3000:3000"
+      - "3001:3000"
     volumes:
       - backups:/app/backups
     env_file:
@@ -21,10 +21,15 @@ services:
       # 注意：在容器内，连接宿主机的数据库可能需要使用 host.docker.internal 
       # 或者如果你希望 docker-compose 管理数据库容器，则使用下方 db 服务的名字
       - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-videocms}
-    command: ["sh", "-c", "prisma migrate deploy && prisma db seed && node server.js"]
+      # JWT / 加密等环境变量可通过 .env 透传
+      - REDIS_URL=redis://redis:6379/0
+    # 移除 seed 脚本，仅保留 migrate deploy：数据库初始化通过运维单独执行，避免容器每次重启重复跑 seed
+    command: ["sh", "-c", "npx prisma migrate deploy && node server.js"]
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_started
     restart: unless-stopped
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:3000/api/health" ]
@@ -50,18 +55,30 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-videocms}
       TZ: Asia/Shanghai
     ports:
-      - "127.0.0.1:5432:5432"
+      - "127.0.0.1:54321:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-videocms}"]
       interval: 10s
       timeout: 5s
-      retries: 5
       start_period: 10s
+
+  # Redis 缓存服务 (O-4 支持)
+  redis:
+    image: redis:7-alpine
+    container_name: videocms_redis
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redisdata:/data
+    command: ["redis-server", "--save", "60", "1", "--loglevel", "warning"]
 
 volumes:
   pgdata:
+    driver: local
+  redisdata:
     driver: local
   backups:
     driver: local
