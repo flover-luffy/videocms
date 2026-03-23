@@ -16,47 +16,54 @@ import { verifyToken } from "@/lib/auth/jwt";
 import { getClientIp } from "@/lib/server-utils";
 import { withRetry } from "@/lib/retry-utils";
 
-
-export const GET = withApiHandler(async (
+export const GET = withApiHandler(
+  async (
     request: NextRequest,
-    { params }: { params: Promise<{ id: string }> }
-) => {
+    { params }: { params: Promise<{ id: string }> },
+  ) => {
     // ── 认证层：必须登录才能获取播放直链 ──
-    const token = request.cookies.get("access_token")?.value || request.headers.get("Authorization")?.split(" ")[1];
+    const token =
+      request.cookies.get("access_token")?.value ||
+      request.headers.get("Authorization")?.split(" ")[1];
     if (!token) {
-        return NextResponse.json({ error: "请先登录后再播放" }, { status: 401 });
+      return NextResponse.json({ error: "请先登录后再播放" }, { status: 401 });
     }
     const userPayload = await verifyToken(token);
     if (!userPayload) {
-        return NextResponse.json({ error: "登录已过期，请重新登录" }, { status: 401 });
+      return NextResponse.json(
+        { error: "登录已过期，请重新登录" },
+        { status: 401 },
+      );
     }
 
     const { id } = await params;
     const episodeId = parseInt(id, 10);
 
     if (isNaN(episodeId)) {
-        return NextResponse.json({ error: "无效的集数 ID" }, { status: 400 });
+      return NextResponse.json({ error: "无效的集数 ID" }, { status: 400 });
     }
 
     // 查询集数及关联的 Series 配置
     const episode = await prisma.episode.findUnique({
-        where: { id: episodeId },
-        include: {
-            series: {
-                include: { openlistConfig: true },
-            },
+      where: { id: episodeId },
+      include: {
+        series: {
+          include: { openlistConfig: true },
         },
+      },
     });
 
     if (!episode) {
-        return NextResponse.json({ error: "集数不存在" }, { status: 404 });
+      return NextResponse.json({ error: "集数不存在" }, { status: 404 });
     }
 
     const config = episode.series.openlistConfig;
 
     // 解密 token（如果已加密）
     const { decrypt, isEncrypted } = await import("@/lib/encryption");
-    const decryptedToken = isEncrypted(config.token) ? decrypt(config.token) : config.token;
+    const decryptedToken = isEncrypted(config.token)
+      ? decrypt(config.token)
+      : config.token;
     const client = createOpenListClient(config.host, decryptedToken);
 
     // 实时获取视频直链与代理链
@@ -65,67 +72,105 @@ export const GET = withApiHandler(async (
     const subtitles: PlayUrlResult["subtitles"] = [];
 
     try {
-        // 【重试增强】：关键的直链获取增加 3 次自动重试
-        const fileInfo = await withRetry(async () => {
-            return await client.getFile(episode.openlistPath);
-        }, { maxRetries: 3, baseDelay: 500 });
+      // 【重试增强】：关键的直链获取增加 3 次自动重试
+      const fileInfo = await withRetry(
+        async () => {
+          return await client.getFile(episode.openlistPath);
+        },
+        { maxRetries: 3, baseDelay: 500 },
+      );
 
-        rawUrl = fileInfo.raw_url;
-        url = client.getProxyUrl(episode.openlistPath, fileInfo.sign);
+      rawUrl = fileInfo.raw_url;
+      url = client.getProxyUrl(episode.openlistPath, fileInfo.sign);
 
-        // ── 字幕关联逻辑 ──
-        const lastSlash = episode.openlistPath.lastIndexOf("/");
-        const parentPath = lastSlash >= 0 ? episode.openlistPath.substring(0, lastSlash) : "/";
-        const fileName = episode.openlistPath.split("/").pop() || "";
-        const baseName = fileName.lastIndexOf(".") >= 0 ? fileName.substring(0, fileName.lastIndexOf(".")) : fileName;
+      // ── 字幕关联逻辑 ──
+      const lastSlash = episode.openlistPath.lastIndexOf("/");
+      const parentPath =
+        lastSlash >= 0 ? episode.openlistPath.substring(0, lastSlash) : "/";
+      const fileName = episode.openlistPath.split("/").pop() || "";
+      const baseName =
+        fileName.lastIndexOf(".") >= 0
+          ? fileName.substring(0, fileName.lastIndexOf("."))
+          : fileName;
 
-        // 【重试增强】：扫描同一目录下的字幕文件
-        const dirFiles = await withRetry(async () => {
-            return await client.listDir(parentPath);
-        }, { maxRetries: 2, baseDelay: 300 }).catch(() => [] as any[]);
+      // 【重试增强】：扫描同一目录下的字幕文件
+      const dirFiles = await withRetry(
+        async () => {
+          return await client.listDir(parentPath);
+        },
+        { maxRetries: 2, baseDelay: 300 },
+      ).catch(() => [] as { is_dir: boolean; name: string }[]);
 
-        const subtitleExts = [".srt", ".vtt"];
+      const subtitleExts = [".srt", ".vtt"];
 
-        for (const f of dirFiles) {
-            if (f.is_dir) continue;
-            const extDot = f.name.lastIndexOf(".");
-            if (extDot === -1) continue;
-            const ext = f.name.slice(extDot).toLowerCase();
-            const nameWithoutExt = f.name.slice(0, extDot);
+      const subTasks = dirFiles
+        .filter((f) => !f.is_dir)
+        .map((f) => {
+          const extDot = f.name.lastIndexOf(".");
+          if (extDot === -1) return null;
+          const ext = f.name.slice(extDot).toLowerCase();
+          const nameWithoutExt = f.name.slice(0, extDot);
 
-            if (subtitleExts.includes(ext) && nameWithoutExt.startsWith(baseName)) {
-                try {
-                    // 获取字幕的具体 sign
-                    const subtitlePath = `${parentPath}/${f.name}`;
-                    const subInfo = await withRetry(async () => {
-                        return await client.getFile(subtitlePath);
-                    }, { maxRetries: 2, baseDelay: 200 });
+          if (
+            subtitleExts.includes(ext) &&
+            nameWithoutExt.startsWith(baseName)
+          ) {
+            const subtitlePath = `${parentPath}/${f.name}`;
+            return async () => {
+              try {
+                const subInfo = await withRetry(
+                  async () => {
+                    return await client.getFile(subtitlePath);
+                  },
+                  { maxRetries: 2, baseDelay: 200 },
+                );
 
-                    let subUrl = client.getProxyUrl(subtitlePath, subInfo.sign);
-                    if (!subUrl.includes(":0")) subUrl += ":0";
+                let subUrl = client.getProxyUrl(subtitlePath, subInfo.sign);
+                if (!subUrl.includes(":0")) subUrl += ":0";
 
-                    subtitles.push({
-                        url: subUrl,
-                        name: f.name,
-                        type: ext.slice(1) as "srt" | "vtt",
-                    });
-                } catch {
-                    console.warn(`[PlayAPI] 字幕文件获取失败，跳过: ${f.name}`);
-                }
-            }
-        }
+                return {
+                  url: subUrl,
+                  name: f.name,
+                  type: ext.slice(1) as "srt" | "vtt",
+                };
+              } catch {
+                console.warn(`[PlayAPI] 字幕文件获取失败，跳过: ${f.name}`);
+                return null;
+              }
+            };
+          }
+          return null;
+        })
+        .filter(
+          (
+            task,
+          ): task is () => Promise<{
+            url: string;
+            name: string;
+            type: "srt" | "vtt";
+          } | null> => task !== null,
+        );
+
+      const subResults = await Promise.all(subTasks.map((task) => task()));
+      for (const res of subResults) {
+        if (res) subtitles.push(res);
+      }
     } catch (err) {
-        console.error("[PlayAPI] 获取资源失败 (已重试):", err);
-        return NextResponse.json({ 
-            error: "由于存储服务器响应超时，获取视频资源失败。建议检查 AList 配置或 CORS 设置。",
-            details: err instanceof Error ? err.message : String(err)
-        }, { status: 502 });
+      console.error("[PlayAPI] 获取资源失败 (已重试):", err);
+      return NextResponse.json(
+        {
+          error:
+            "由于存储服务器响应超时，获取视频资源失败。建议检查 AList 配置或 CORS 设置。",
+          details: err instanceof Error ? err.message : String(err),
+        },
+        { status: 502 },
+      );
     }
 
     const result: PlayUrlResult = {
-        url: url,
-        rawUrl: rawUrl,
-        subtitles: subtitles.length > 0 ? subtitles : undefined,
+      url: url,
+      rawUrl: rawUrl,
+      subtitles: subtitles.length > 0 ? subtitles : undefined,
     };
 
     // 播放统计防刷逻辑：24 小时内同一 IP 只计数一次
@@ -136,37 +181,38 @@ export const GET = withApiHandler(async (
 
     // 异步处理播放统计（不阻塞响应）
     (async () => {
-        try {
-            const recentPlay = await prisma.playEvent.findFirst({
-                where: {
-                    seriesId: episode.seriesId,
-                    ip,
-                    createdAt: { gte: oneDayAgo },
-                },
-            });
+      try {
+        const recentPlay = await prisma.playEvent.findFirst({
+          where: {
+            seriesId: episode.seriesId,
+            ip,
+            createdAt: { gte: oneDayAgo },
+          },
+        });
 
-            // 如果 24 小时内没有播放记录，则增加计数
-            if (!recentPlay) {
-                await prisma.$transaction([
-                    // 记录播放事件
-                    prisma.playEvent.create({
-                        data: {
-                            seriesId: episode.seriesId,
-                            ip,
-                            userId,
-                        },
-                    }),
-                    // 增加播放次数
-                    prisma.series.update({
-                        where: { id: episode.seriesId },
-                        data: { playCount: { increment: 1 } },
-                    }),
-                ]);
-            }
-        } catch (err) {
-            console.error("[PlayAPI] 播放统计更新失败:", err);
+        // 如果 24 小时内没有播放记录，则增加计数
+        if (!recentPlay) {
+          await prisma.$transaction([
+            // 记录播放事件
+            prisma.playEvent.create({
+              data: {
+                seriesId: episode.seriesId,
+                ip,
+                userId,
+              },
+            }),
+            // 增加播放次数
+            prisma.series.update({
+              where: { id: episode.seriesId },
+              data: { playCount: { increment: 1 } },
+            }),
+          ]);
         }
+      } catch (err) {
+        console.error("[PlayAPI] 播放统计更新失败:", err);
+      }
     })();
 
     return NextResponse.json(result);
-});
+  },
+);

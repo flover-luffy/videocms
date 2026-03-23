@@ -4,73 +4,112 @@ import { ENCRYPTION_CONFIG } from "@/config";
 const ALGORITHM = "aes-256-gcm";
 const IV_LENGTH = 16;
 const KEY_LENGTH = 32;
+const CURRENT_PBKDF2_ITERATIONS = 600_000;
+const LEGACY_PBKDF2_ITERATIONS = [100_000];
+const AUTH_ERROR_HINTS = [
+  "Unsupported state",
+  "unable to authenticate data",
+  "authTag",
+];
 
-/**
- * 从统一配置派生加密密钥
- */
-function getEncryptionKey(): Buffer {
-    const { SECRET, SALT } = ENCRYPTION_CONFIG;
-    // 使用 PBKDF2 派生固定长度密钥 (32 字节)
-    return crypto.pbkdf2Sync(SECRET, SALT, 100000, KEY_LENGTH, "sha256");
+const derivedKeyCache = new Map<number, Buffer>();
+
+function getEncryptionKey(iterations = CURRENT_PBKDF2_ITERATIONS): Buffer {
+  const cachedKey = derivedKeyCache.get(iterations);
+  if (cachedKey) {
+    return cachedKey;
+  }
+
+  const { SECRET, SALT } = ENCRYPTION_CONFIG;
+  const key = crypto.pbkdf2Sync(SECRET, SALT, iterations, KEY_LENGTH, "sha256");
+  derivedKeyCache.set(iterations, key);
+  return key;
 }
 
-/**
- * 加密敏感数据
- */
+function parseCiphertext(ciphertext: string) {
+  const parts = ciphertext.split(":");
+  if (parts.length !== 3) {
+    throw new Error("无效的加密数据格式");
+  }
+
+  const [ivHex, encrypted, tagHex] = parts;
+  const iv = Buffer.from(ivHex, "hex");
+  const tag = Buffer.from(tagHex, "hex");
+
+  if (iv.byteLength !== IV_LENGTH || tag.byteLength !== 16) {
+    throw new Error("无效的加密数据格式");
+  }
+
+  return { iv, encrypted, tag };
+}
+
+function decryptWithKey(
+  iv: Buffer,
+  encrypted: string,
+  tag: Buffer,
+  key: Buffer,
+): string {
+  const decipher = crypto.createDecipheriv(ALGORITHM, key, iv);
+  decipher.setAuthTag(tag);
+
+  let decrypted = decipher.update(encrypted, "hex", "utf8");
+  decrypted += decipher.final("utf8");
+  return decrypted;
+}
+
+function isAuthError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return AUTH_ERROR_HINTS.some((hint) => message.includes(hint));
+}
+
 export function encrypt(plaintext: string): string {
-    const key = getEncryptionKey();
-    const iv = crypto.randomBytes(IV_LENGTH);
+  const key = getEncryptionKey();
+  const iv = crypto.randomBytes(IV_LENGTH);
+  const cipher = crypto.createCipheriv(ALGORITHM, key, iv);
 
-    const cipher = crypto.createCipheriv(ALGORITHM, key, iv);
+  let encrypted = cipher.update(plaintext, "utf8", "hex");
+  encrypted += cipher.final("hex");
 
-    let encrypted = cipher.update(plaintext, "utf8", "hex");
-    encrypted += cipher.final("hex");
-
-    const tag = cipher.getAuthTag();
-
-    // 格式: iv:encrypted:tag
-    return `${iv.toString("hex")}:${encrypted}:${tag.toString("hex")}`;
+  const tag = cipher.getAuthTag();
+  return `${iv.toString("hex")}:${encrypted}:${tag.toString("hex")}`;
 }
 
 export function decrypt(ciphertext: string): string {
-    const key = getEncryptionKey();
-    const parts = ciphertext.split(":");
+  const { iv, encrypted, tag } = parseCiphertext(ciphertext);
+  const attemptedIterations = [
+    CURRENT_PBKDF2_ITERATIONS,
+    ...LEGACY_PBKDF2_ITERATIONS,
+  ];
+  let lastError: unknown;
 
-    if (parts.length !== 3) {
-        throw new Error("无效的加密数据格式");
-    }
-
-    const iv = Buffer.from(parts[0], "hex");
-    const encrypted = parts[1];
-    const tag = Buffer.from(parts[2], "hex");
-
+  for (const iterations of attemptedIterations) {
     try {
-        const decipher = crypto.createDecipheriv(ALGORITHM, key, iv);
-        decipher.setAuthTag(tag);
-
-        let decrypted = decipher.update(encrypted, "hex", "utf8");
-        decrypted += decipher.final("utf8");
-
-        return decrypted;
-    } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        console.error("[Encryption] 解密失败。可能原因：密钥不匹配、数据被篡改或环境变量已变更。", {
-            error: message,
-            ciphertextLength: ciphertext.length,
-            keyHash: crypto.createHash('sha256').update(key).digest('hex').substring(0, 8)
-        });
-        
-        if (message.includes("Unsupported state") || message.includes("authTag")) {
-            throw new Error("数据解密认证失败：加密密钥不正确或数据已损坏。请尝试重新保存配置。");
-        }
-        throw err instanceof Error ? err : new Error(message);
+      return decryptWithKey(iv, encrypted, tag, getEncryptionKey(iterations));
+    } catch (error) {
+      lastError = error;
+      if (!isAuthError(error)) {
+        throw error instanceof Error ? error : new Error(String(error));
+      }
     }
+  }
+
+  const message =
+    lastError instanceof Error ? lastError.message : String(lastError);
+  console.error(
+    "[Encryption] Decryption failed. Possible causes: key mismatch, tampered data, or changed environment variables.",
+    {
+      error: message,
+      ciphertextLength: ciphertext.length,
+      attemptedIterations,
+    },
+  );
+
+  throw new Error(
+    "数据解密认证失败：加密密钥不正确或数据已损坏。请尝试重新保存配置。",
+  );
 }
 
-/**
- * 检查字符串是否已加密
- */
 export function isEncrypted(value: string): boolean {
-    const parts = value.split(":");
-    return parts.length === 3 && parts.every(part => /^[0-9a-f]+$/i.test(part));
+  const parts = value.split(":");
+  return parts.length === 3 && parts.every((part) => /^[0-9a-f]+$/i.test(part));
 }

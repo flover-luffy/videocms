@@ -40,9 +40,9 @@ async function main() {
                 role: "admin",
             },
         });
-        console.log(`✓ 管理员账号已创建: ${email}`);
+        console.info(`✓ 管理员账号已创建: ${email}`);
     } else {
-        console.log(`ℹ 管理员账号已存在: ${email}，跳过创建`);
+        console.info(`ℹ 管理员账号已存在: ${email}，跳过创建`);
     }
 }
 

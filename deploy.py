@@ -1,152 +1,380 @@
 import os
+import shlex
 import sys
-import subprocess
-import time
-import paramiko
 import tarfile
+import time
+
+import paramiko
+from dotenv import load_dotenv
 from scp import SCPClient
 
-# ============================================================
-# VideoCMS 自动化云端部署脚本 (云端构建版)
-# 身份：资深软件架构师
-# 功能：源码打包 -> 远程上传 -> 云端构建 -> 自动化部署
-# ============================================================
+load_dotenv()
 
-# 配置信息
-SERVER_IP = "43.156.239.16"
-SERVER_USER = "root"
-SERVER_PASS = "123.abc456*"
+ENV_FILE = ".env"
 REMOTE_DEPLOY_DIR = "/root/videocms-deploy"
 SOURCE_TAR = "videocms_source.tar.gz"
+COMPOSE_PROJECT = "videocms"
+APP_SERVICE = "app"
+APP_CONTAINER = "videocms_app"
+HEALTH_TIMEOUT_SECONDS = 180
+HEALTH_POLL_INTERVAL_SECONDS = 5
 
-# 需要排除的目录和文件 (避免上传垃圾或巨大依赖)
-EXCLUDE_DIRS = {'.git', 'node_modules', '.next', 'test-results', 'backups', 'prisma/migrations/node_modules'}
-EXCLUDE_FILES = {SOURCE_TAR, 'deploy.py', '.env.example', 'test-output.txt'}
+REQUIRED_ENV_VARS = (
+    "DEPLOY_SERVER_IP",
+    "DEPLOY_SERVER_USER",
+    "DEPLOY_SERVER_PASS",
+    "POSTGRES_USER",
+    "POSTGRES_PASSWORD",
+    "POSTGRES_DB",
+    "DATABASE_URL",
+    "REDIS_URL",
+)
 
-def print_step(msg):
-    print(f"\n[\033[1;34mSTEP\033[0m] {msg}")
+EXCLUDE_DIRS = {
+    ".git",
+    ".next",
+    ".gemini",
+    ".vscode",
+    "backups",
+    "node_modules",
+    "prisma/migrations/node_modules",
+    "test-results",
+}
+EXCLUDE_FILES = {
+    ENV_FILE,
+    SOURCE_TAR,
+    ".DS_Store",
+    ".env.example",
+    "deploy.py",
+    "test-output.txt",
+    "test_connection.py",
+}
+EXCLUDE_SUFFIXES = (".tsbuildinfo",)
 
-def print_success(msg):
-    print(f"[\033[1;32mSUCCESS\033[0m] {msg}")
 
-def print_error(msg):
-    print(f"[\033[1;31mERROR\033[0m] {msg}")
+class DeploymentError(RuntimeError):
+    """Raised when the deployment flow cannot continue safely."""
+
+
+def print_step(message):
+    print(f"\n[\033[1;34mSTEP\033[0m] {message}")
+
+
+def print_success(message):
+    print(f"[\033[1;32mSUCCESS\033[0m] {message}")
+
+
+def print_error(message):
+    print(f"[\033[1;31mERROR\033[0m] {message}")
+
 
 def progress_callback(filename, size, sent):
-    sys.stdout.write(f"  > 正在上传 {filename}: {float(sent)/float(size)*100:.1f}% \r")
+    if size <= 0:
+        return
+    percentage = float(sent) / float(size) * 100
+    sys.stdout.write(f"  > Uploading {filename}: {percentage:.1f}%\r")
     sys.stdout.flush()
 
+
+def validate_environment(env=None, env_file_path=ENV_FILE):
+    env = os.environ if env is None else env
+    if not os.path.exists(env_file_path):
+        raise DeploymentError(f"Missing required file: {env_file_path}")
+
+    missing_vars = []
+    for name in REQUIRED_ENV_VARS:
+        value = env.get(name, "")
+        if not str(value).strip():
+            missing_vars.append(name)
+
+    if missing_vars:
+        raise DeploymentError(
+            "Missing required environment variables: " + ", ".join(missing_vars)
+        )
+
+    return {
+        "server_ip": env["DEPLOY_SERVER_IP"].strip(),
+        "server_user": env["DEPLOY_SERVER_USER"].strip(),
+        "server_pass": env["DEPLOY_SERVER_PASS"].strip(),
+    }
+
+
+def should_exclude_tarinfo(tarinfo):
+    normalized_name = tarinfo.name.replace("\\", "/")
+    parts = [part for part in normalized_name.split("/") if part not in ("", ".")]
+    if not parts:
+        return False
+
+    basename = parts[-1]
+    if basename in EXCLUDE_FILES or basename in EXCLUDE_DIRS:
+        return True
+    if basename.endswith(EXCLUDE_SUFFIXES):
+        return True
+    if any(part in EXCLUDE_DIRS for part in parts):
+        return True
+    return False
+
+
 def make_tarfile(output_filename, source_dir):
-    print_step(f"正在打包源码至 {output_filename}...")
+    print_step(f"Packing source into {output_filename}...")
+
     def exclude_function(tarinfo):
-        # 检查是否在排除列表中
-        name = os.path.basename(tarinfo.name)
-        if name in EXCLUDE_DIRS or name in EXCLUDE_FILES:
+        if should_exclude_tarinfo(tarinfo):
             return None
-        # 也可以检查路径片段
-        for d in EXCLUDE_DIRS:
-            if f"/{d}/" in tarinfo.name or tarinfo.name.startswith(f"{d}/"):
-                return None
         return tarinfo
 
     with tarfile.open(output_filename, "w:gz") as tar:
         tar.add(source_dir, arcname=".", filter=exclude_function)
-    
+
     size_mb = os.path.getsize(output_filename) / (1024 * 1024)
-    print_success(f"源码打包完成 (体积: {size_mb:.2f} MB)")
+    print_success(f"Source package created ({size_mb:.2f} MB)")
+
+
+def run_remote_command(ssh, command, *, description=None, stream=False, check=True):
+    if description:
+        print_step(description)
+
+    stdin, stdout, stderr = ssh.exec_command(command, get_pty=stream)
+    del stdin
+
+    if stream:
+        output_chunks = []
+        for line in iter(stdout.readline, ""):
+            if not line:
+                break
+            print(line, end="")
+            output_chunks.append(line)
+        exit_status = stdout.channel.recv_exit_status()
+        output_text = "".join(output_chunks)
+        error_text = ""
+    else:
+        output_text = stdout.read().decode("utf-8", errors="replace")
+        error_text = stderr.read().decode("utf-8", errors="replace")
+        exit_status = stdout.channel.recv_exit_status()
+
+        if output_text:
+            print(output_text, end="" if output_text.endswith("\n") else "\n")
+        if error_text:
+            print(error_text, end="" if error_text.endswith("\n") else "\n")
+
+    if check and exit_status != 0:
+        raise DeploymentError(
+            f"Remote command failed with exit code {exit_status}: {command}"
+        )
+
+    return exit_status, output_text, error_text
+
+
+def capture_remote_command(ssh, command, *, check=True):
+    stdin, stdout, stderr = ssh.exec_command(command)
+    del stdin
+
+    output_text = stdout.read().decode("utf-8", errors="replace")
+    error_text = stderr.read().decode("utf-8", errors="replace")
+    exit_status = stdout.channel.recv_exit_status()
+
+    if check and exit_status != 0:
+        raise DeploymentError(
+            f"Remote command failed with exit code {exit_status}: {command}"
+        )
+
+    return exit_status, output_text, error_text
+
+
+def cd_remote(command):
+    return f"cd {shlex.quote(REMOTE_DEPLOY_DIR)} && {command}"
+
+
+def wait_for_app_health(ssh):
+    print_step(
+        f"Waiting for {APP_CONTAINER} to become healthy "
+        f"(timeout: {HEALTH_TIMEOUT_SECONDS}s)..."
+    )
+    deadline = time.time() + HEALTH_TIMEOUT_SECONDS
+    last_status = None
+    inspect_command = (
+        "docker inspect --format "
+        "'{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "
+        f"{shlex.quote(APP_CONTAINER)}"
+    )
+
+    while time.time() < deadline:
+        exit_status, output_text, _ = capture_remote_command(
+            ssh, inspect_command, check=False
+        )
+        status = output_text.strip() if exit_status == 0 else "missing"
+
+        if status != last_status:
+            print(f"  > Container status: {status}")
+            last_status = status
+
+        if status == "healthy":
+            print_success(f"{APP_CONTAINER} is healthy")
+            return
+
+        if status in {"dead", "exited", "unhealthy"}:
+            raise DeploymentError(f"{APP_CONTAINER} became {status}")
+
+        time.sleep(HEALTH_POLL_INTERVAL_SECONDS)
+
+    final_status = last_status or "unknown"
+    raise DeploymentError(
+        f"Timed out after {HEALTH_TIMEOUT_SECONDS}s waiting for {APP_CONTAINER} "
+        f"(last status: {final_status})"
+    )
+
+
+def dump_remote_diagnostics(ssh):
+    try:
+        print_step("Remote container status")
+        _, output_text, error_text = capture_remote_command(
+            ssh, cd_remote(f"docker compose -p {COMPOSE_PROJECT} ps"), check=False
+        )
+        if output_text:
+            print(output_text, end="" if output_text.endswith("\n") else "\n")
+        if error_text:
+            print(error_text, end="" if error_text.endswith("\n") else "\n")
+
+        print_step("Recent app logs")
+        _, output_text, error_text = capture_remote_command(
+            ssh,
+            cd_remote(f"docker compose -p {COMPOSE_PROJECT} logs --tail=100 {APP_SERVICE}"),
+            check=False,
+        )
+        if output_text:
+            print(output_text, end="" if output_text.endswith("\n") else "\n")
+        if error_text:
+            print(error_text, end="" if error_text.endswith("\n") else "\n")
+    except Exception as exc:  # pragma: no cover - defensive diagnostics path
+        print_error(f"Unable to collect remote diagnostics: {exc}")
+
 
 def main():
     start_time = time.time()
-    
-    # 1. 本地打包源码
-    make_tarfile(SOURCE_TAR, ".")
+    ssh = None
+    server_ip = None
+    stack_started = False
+    deployment_succeeded = False
 
-    # 2. 连接服务器并上传
-    print_step(f"正在建立 SSH 连接 ({SERVER_IP})...")
-    ssh = paramiko.SSHClient()
-    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    
     try:
-        # 增加超时时间以应对网络抖动和 Windows 环境下的 SSH 握手延迟
-        print("  > 正在尝试 SSH 握手...")
+        config = validate_environment()
+        server_ip = config["server_ip"]
+
+        make_tarfile(SOURCE_TAR, ".")
+
+        print_step(f"Connecting to {server_ip} via SSH...")
+        ssh = paramiko.SSHClient()
+        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         ssh.connect(
-            SERVER_IP, 
-            username=SERVER_USER, 
-            password=SERVER_PASS, 
-            timeout=20, 
-            banner_timeout=200, # 核心修复：解决 Error reading SSH protocol banner
-            auth_timeout=60
+            server_ip,
+            username=config["server_user"],
+            password=config["server_pass"],
+            timeout=30,
+            banner_timeout=60,
+            auth_timeout=60,
         )
-        print_success("SSH 连接成功")
+        print_success("SSH connection established")
 
-        # 确保远程目录存在并清理旧代码
-        ssh.exec_command(f"rm -rf {REMOTE_DEPLOY_DIR} && mkdir -p {REMOTE_DEPLOY_DIR}")
-        
+        run_remote_command(
+            ssh,
+            f"rm -rf {shlex.quote(REMOTE_DEPLOY_DIR)} && mkdir -p {shlex.quote(REMOTE_DEPLOY_DIR)}",
+            description="Preparing remote deployment directory...",
+        )
+
         with SCPClient(ssh.get_transport(), progress=progress_callback) as scp:
-            # 上传源码包
-            print_step("正在上传源码包...")
+            print_step("Uploading deployment bundle...")
             scp.put(SOURCE_TAR, remote_path=REMOTE_DEPLOY_DIR)
-            print_success("\n源码上传完成")
+            scp.put(ENV_FILE, remote_path=REMOTE_DEPLOY_DIR)
+            print("\n  > Synced .env")
+            print_success("Upload completed")
 
-            # 上传核心运行配置 (如果有独立的配置文件可以额外放这里)
-            # 注意：.env 通常应该在服务器上保留或通过脚本传输
-            if os.path.exists(".env"):
-                scp.put(".env", remote_path=REMOTE_DEPLOY_DIR)
-                print("  > 已上传: .env")
+        run_remote_command(
+            ssh,
+            cd_remote(f"tar -xzf {shlex.quote(SOURCE_TAR)}"),
+            description="Extracting uploaded source...",
+        )
+        run_remote_command(
+            ssh,
+            cd_remote(
+                f"docker compose -p {COMPOSE_PROJECT} stop {APP_SERVICE} 2>/dev/null || true"
+            ),
+            description="Stopping previous app container...",
+        )
+        run_remote_command(
+            ssh,
+            cd_remote(
+                "export DOCKER_BUILDKIT=1 && "
+                f"docker compose -p {COMPOSE_PROJECT} build --no-cache --progress=plain {APP_SERVICE}"
+            ),
+            description="Building app image...",
+            stream=True,
+        )
+        run_remote_command(
+            ssh,
+            cd_remote(f"docker compose -p {COMPOSE_PROJECT} up -d"),
+            description="Starting compose stack...",
+        )
+        stack_started = True
 
-        # 3. 远程执行部署命令 (解压 -> 构建 -> 启动 -> 初始化种子)
-        print_step("正在执行远程构建与部署 (这在云端可能需要几分钟)...")
-        # 注意：不再在 docker-compose 内部 seed，而是在部署完成后通过命令行触发一次，保证幂等且不阻塞启动
-        deploy_cmds = [
-            f"cd {REMOTE_DEPLOY_DIR}",
-            f"tar -xzf {SOURCE_TAR}",
-            "docker compose -p videocms up -d --build",
-            # 1. 清理构建产生的冗余镜像（解决“无用依赖”问题）
-            "docker image prune -f",
-            # 2. 清理宿主机源码，仅保留运行时必须的 docker-compose.yml 和 .env
-            "echo '  > 正在移除云端源码以节省空间并增强安全性...'",
-            "find . -maxdepth 1 ! -name 'docker-compose.yml' ! -name '.env' ! -name '.' -exec rm -rf {} +",
-            "echo '  > 正在等待服务启动以执行初始化...'",
-            "sleep 10", # 给容器一点启动时间
-            "docker compose -p videocms exec -T app npx prisma db seed"
-        ]
-        
-        # 将命令合并，并确保每一个步骤成功才会继续
-        full_cmd = " && ".join(deploy_cmds)
-        
-        # 使用 get_pty=True 以便看到带颜色的输出和实时流
-        stdin, stdout, stderr = ssh.exec_command(full_cmd, get_pty=True)
-        
-        # 实时打印远程输出
-        for line in stdout:
-            print(f"  [REMOTE] {line.strip()}")
-        
-        exit_status = stdout.channel.recv_exit_status()
-        if exit_status == 0:
-            print_success("远程构建与部署完成 (含数据库种子初始化)")
-            
-            # 4. 最终连通性简单自检
-            print_step("正在检查容器健康状态...")
-            _, out, _ = ssh.exec_command("docker compose -p videocms ps")
-            for line in out:
-                print(f"  {line.strip()}")
-        else:
-            print_error(f"部署过程中发生错误，退出码: {exit_status}")
-            print(stderr.read().decode())
+        run_remote_command(
+            ssh,
+            cd_remote("docker image prune -f"),
+            description="Pruning dangling images...",
+        )
+        run_remote_command(
+            ssh,
+            cd_remote(
+                "find . -maxdepth 1 "
+                "! -name 'docker-compose.yml' "
+                "! -name '.env' "
+                "! -name '.' "
+                "-exec rm -rf {} +"
+            ),
+            description="Cleaning remote source directory...",
+        )
 
-    except Exception as e:
-        print_error(f"过程中发生异常: {str(e)}")
+        wait_for_app_health(ssh)
+
+        run_remote_command(
+            ssh,
+            cd_remote(
+                f"docker compose -p {COMPOSE_PROJECT} exec -T {APP_SERVICE} npx prisma db seed"
+            ),
+            description="Running database seed...",
+            stream=True,
+        )
+        print_success("Remote deployment completed")
+
+        run_remote_command(
+            ssh,
+            cd_remote(f"docker compose -p {COMPOSE_PROJECT} ps"),
+            description="Current container status",
+        )
+
+        deployment_succeeded = True
+        return 0
+    except DeploymentError as exc:
+        print_error(str(exc))
+        if ssh is not None and stack_started:
+            dump_remote_diagnostics(ssh)
+        return 1
+    except Exception as exc:  # pragma: no cover - top-level safety net
+        print_error(f"Unexpected error: {exc}")
+        if ssh is not None and stack_started:
+            dump_remote_diagnostics(ssh)
+        return 1
     finally:
-        ssh.close()
+        if ssh is not None:
+            ssh.close()
         if os.path.exists(SOURCE_TAR):
             os.remove(SOURCE_TAR)
-            print_success("已清理本地临时源码包")
+            print_success("Removed local temporary source archive")
 
-    end_time = time.time()
-    print(f"\n\033[1;32m全自动化部署任务完成！总耗时: {int(end_time - start_time)} 秒\033[0m")
-    print(f"应用访问地址: http://{SERVER_IP}:3001")
-    print(f"数据库访问端口: 54321 (映射自容器 5432)")
-    print(f"监控状态: OpenTelemetry 已激活，数据上报中...")
+        elapsed_seconds = int(time.time() - start_time)
+        print(f"\n\033[1;32mFinished in {elapsed_seconds}s\033[0m")
+        if deployment_succeeded and server_ip:
+            print(f"App URL: http://{server_ip}:3001")
+
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

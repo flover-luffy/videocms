@@ -10,7 +10,7 @@ async function main() {
       posterUrl: { not: null }
     }
   })
-  console.log('Poster URL:', series?.posterUrl)
+  console.info('Poster URL:', series?.posterUrl)
 }
 
 main()

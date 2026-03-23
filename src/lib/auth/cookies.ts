@@ -5,10 +5,10 @@
 import type { NextResponse } from "next/server";
 
 interface SetAuthCookiesOptions {
-    accessToken: string;
-    refreshToken: string;
-    /** 是否为 HTTPS 环境（默认通过 NODE_ENV 判断） */
-    secure?: boolean;
+  accessToken: string;
+  refreshToken: string;
+  /** 是否为 HTTPS 环境（默认通过 NODE_ENV 判断） */
+  secure?: boolean;
 }
 
 import { JWT_CONFIG } from "@/config";
@@ -19,25 +19,25 @@ import { JWT_CONFIG } from "@/config";
  * @param opts  Token 选项
  */
 export function setAuthCookies(
-    res: NextResponse,
-    opts: SetAuthCookiesOptions,
+  res: NextResponse,
+  opts: SetAuthCookiesOptions,
 ): void {
-    const isSecure = opts.secure ?? process.env.NODE_ENV === "production";
+  const isSecure = opts.secure ?? process.env.NODE_ENV === "production";
 
-    const baseOptions = {
-        httpOnly: true,
-        secure: isSecure,
-        sameSite: "lax" as const,
-        path: "/",
-    };
+  const baseOptions = {
+    httpOnly: true,
+    secure: isSecure,
+    sameSite: "lax" as const,
+    path: "/",
+  };
 
-    res.cookies.set("access_token", opts.accessToken, {
-        ...baseOptions,
-        maxAge: JWT_CONFIG.ACCESS_TOKEN_MAX_AGE,
-    });
+  res.cookies.set("access_token", opts.accessToken, {
+    ...baseOptions,
+    maxAge: JWT_CONFIG.ACCESS_TOKEN_MAX_AGE,
+  });
 
-    res.cookies.set("refresh_token", opts.refreshToken, {
-        ...baseOptions,
-        maxAge: JWT_CONFIG.REFRESH_TOKEN_MAX_AGE,
-    });
+  res.cookies.set("refresh_token", opts.refreshToken, {
+    ...baseOptions,
+    maxAge: JWT_CONFIG.REFRESH_TOKEN_MAX_AGE,
+  });
 }

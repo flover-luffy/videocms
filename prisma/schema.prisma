@@ -9,6 +9,19 @@ datasource db {
   provider = "postgresql"
 }
 
+// ── 枚举类型 ──────────────────────────────────────
+enum Role {
+  admin
+  user
+}
+
+enum MediaType {
+  movie
+  tv
+  documentary
+  variety
+}
+
 // ── OpenList 连接配置 ──────────────────────────────
 model OpenlistConfig {
   id        Int       @id @default(autoincrement())
@@ -25,7 +38,7 @@ model OpenlistConfig {
 model Series {
   id              Int             @id @default(autoincrement())
   title           String
-  type            String          @default("tv") // movie | tv | documentary | variety
+  type            MediaType       @default(tv)
   sourcePath      String          // OpenList 目录路径
   tmdbId          Int?
   posterUrl       String?
@@ -112,7 +125,7 @@ model User {
   id                  Int       @id @default(autoincrement())
   email               String    @unique
   passwordHash        String
-  role                String    @default("user") // admin | user
+  role                Role      @default(user)
   tokenInvalidatedAt  DateTime? // 用于使所有旧 token 失效（密码重置、强制登出）
   createdAt           DateTime  @default(now())
 
@@ -158,6 +171,8 @@ model PlayEvent {
 
   series    Series   @relation(fields: [seriesId], references: [id], onDelete: Cascade)
   seriesId  Int
+
+  @@index([ip])
 }
 
 // ── 审计日志 ──────────────────────────────────────
@@ -191,15 +206,6 @@ model VerificationToken {
   @@index([email])
 }
 
-// ── 已注销 Token (黑名单) ─────────────────────────
-model RevokedToken {
-  id        Int      @id @default(autoincrement())
-  jti       String   @unique  // JWT 的唯一标识符 (JWT ID)
-  expiresAt DateTime          // Token 的物理过期时间，用于定期清理数据库记录
-  createdAt DateTime @default(now())
-
-  @@index([expiresAt])
-}
 
 // ── Token 黑名单 ──────────────────────────────────
 model TokenBlacklist {

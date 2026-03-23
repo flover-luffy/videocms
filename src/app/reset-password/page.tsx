@@ -1,231 +1,207 @@
 "use client";
-import { useState, useEffect, Suspense } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
-import { fetchWithCsrf } from "@/lib/fetch-client";
+
 import Link from "next/link";
-import Navbar from "@/components/layout/Navbar";
+import { Suspense, useEffect, useState, type FormEvent } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import AuthShell from "@/components/layout/AuthShell";
+import { fetchWithCsrf } from "@/lib/fetch-client";
 
 function ResetPasswordForm() {
-    const router = useRouter();
-    const searchParams = useSearchParams();
-    const token = searchParams.get("token");
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const token = searchParams.get("token");
 
-    const [password, setPassword] = useState("");
-    const [confirmPassword, setConfirmPassword] = useState("");
-    const [loading, setLoading] = useState(false);
-    const [errorMsg, setErrorMsg] = useState("");
-    const [successMsg, setSuccessMsg] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState("");
+  const [successMsg, setSuccessMsg] = useState("");
 
-    // 密码强度规则
-    const passwordRules = [
-        { label: "至少 12 个字符", valid: password.length >= 12 },
-        { label: "包含大写字母", valid: /[A-Z]/.test(password) },
-        { label: "包含数字", valid: /[0-9]/.test(password) },
-        { label: "包含特殊字符 (!@#$%^&*)", valid: /[!@#$%^&*]/.test(password) }
-    ];
-    const isPasswordValid = passwordRules.every(r => r.valid);
+  const passwordRules = [
+    { label: "至少 12 个字符", valid: password.length >= 12 },
+    { label: "包含大写字母", valid: /[A-Z]/.test(password) },
+    { label: "包含数字", valid: /[0-9]/.test(password) },
+    { label: "包含特殊字符 (!@#$%^&*)", valid: /[!@#$%^&*]/.test(password) },
+  ];
+  const isPasswordValid = passwordRules.every((rule) => rule.valid);
 
-    useEffect(() => {
-        if (!token) {
-            setErrorMsg("无效的重置链接");
-        }
-    }, [token]);
+  useEffect(() => {
+    if (!token) {
+      setErrorMsg("无效的重置链接，请重新发起找回密码流程。");
+    }
+  }, [token]);
 
-    const handleSubmit = async (e: React.FormEvent) => {
-        e.preventDefault();
+  useEffect(() => {
+    if (!successMsg) {
+      return undefined;
+    }
 
-        if (!token) {
-            setErrorMsg("无效的重置链接");
-            return;
-        }
+    const timer = window.setTimeout(() => {
+      router.push("/login");
+    }, 3000);
 
-        if (!password || !confirmPassword) {
-            setErrorMsg("请填写完整信息");
-            return;
-        }
+    return () => window.clearTimeout(timer);
+  }, [router, successMsg]);
 
-        if (password !== confirmPassword) {
-            setErrorMsg("两次输入的密码不一致");
-            return;
-        }
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
 
-        if (!isPasswordValid) {
-            setErrorMsg("密码不符合安全要求");
-            return;
-        }
+    if (!token) {
+      setErrorMsg("无效的重置链接，请重新发起找回密码流程。");
+      return;
+    }
 
-        setLoading(true);
-        setErrorMsg("");
-        setSuccessMsg("");
+    if (!password || !confirmPassword) {
+      setErrorMsg("请完整填写新密码。");
+      return;
+    }
 
-        try {
-            const res = await fetchWithCsrf("/api/auth/reset-password", {
-                method: "POST",
-                body: JSON.stringify({ token, password }),
-            });
-            const data = await res.json();
+    if (password !== confirmPassword) {
+      setErrorMsg("两次输入的密码不一致。");
+      return;
+    }
 
-            if (res.ok) {
-                setSuccessMsg(data.message || "密码重置成功");
-                // 3 秒后跳转到登录页
-                setTimeout(() => {
-                    router.push("/login");
-                }, 3000);
-            } else {
-                setErrorMsg(data.error || "重置失败，请重试");
-            }
-        } catch {
-            setErrorMsg("网络请求失败，请稍后重试");
-        } finally {
-            setLoading(false);
-        }
-    };
+    if (!isPasswordValid) {
+      setErrorMsg("密码未满足安全要求，请先修正。");
+      return;
+    }
 
-    return (
-        <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
-            <Navbar />
-            <main style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: "calc(80px + 2rem) 1.5rem 4rem" }}>
-                <div className="glass fade-in-up" style={{ width: "100%", maxWidth: "400px", padding: "2.5rem", borderRadius: "1.25rem" }}>
-                    <div style={{ textAlign: "center", marginBottom: "2rem" }}>
-                        <h1 style={{ fontSize: "1.5rem", fontWeight: 800, marginBottom: "0.5rem" }}>重置密码</h1>
-                        <p style={{ color: "var(--color-muted)", fontSize: "0.875rem" }}>
-                            请输入您的新密码
-                        </p>
-                    </div>
+    setLoading(true);
+    setErrorMsg("");
+    setSuccessMsg("");
 
-                    {successMsg ? (
-                        <div style={{ 
-                            padding: "1.5rem", 
-                            background: "rgba(16, 185, 129, 0.1)", 
-                            border: "1px solid rgba(16, 185, 129, 0.3)",
-                            borderRadius: "0.5rem",
-                            textAlign: "center"
-                        }}>
-                            <div style={{ fontSize: "2rem", marginBottom: "0.5rem" }}>✓</div>
-                            <p style={{ color: "#10b981", fontSize: "0.875rem", marginBottom: "0.5rem" }}>
-                                {successMsg}
-                            </p>
-                            <p style={{ color: "var(--color-muted)", fontSize: "0.8125rem", margin: 0 }}>
-                                正在跳转到登录页...
-                            </p>
-                        </div>
-                    ) : (
-                        <form onSubmit={handleSubmit} noValidate>
-                            <div style={{ marginBottom: "1.25rem" }}>
-                                <label htmlFor="password" style={{ display: "block", fontSize: "0.8125rem", fontWeight: 600, color: "var(--color-muted)", marginBottom: "0.5rem" }}>
-                                    新密码
-                                </label>
-                                <input
-                                    id="password"
-                                    type="password"
-                                    required
-                                    className="form-input"
-                                    placeholder="输入新密码"
-                                    value={password}
-                                    onChange={(e) => setPassword(e.target.value)}
-                                    disabled={!token}
-                                    style={{ 
-                                        width: "100%", 
-                                        background: "var(--color-bg)", 
-                                        border: "1px solid var(--color-border)", 
-                                        borderRadius: "0.5rem", 
-                                        color: "var(--color-text)", 
-                                        padding: "0.75rem", 
-                                        outline: "none" 
-                                    }}
-                                />
-                                {password && (
-                                    <div className="fade-in" style={{ display: "flex", flexDirection: "column", gap: "0.375rem", marginTop: "0.75rem" }}>
-                                        {passwordRules.map((rule, idx) => (
-                                            <div key={idx} style={{
-                                                display: "flex",
-                                                alignItems: "center",
-                                                gap: "0.5rem",
-                                                fontSize: "0.75rem",
-                                                color: rule.valid ? "#10b981" : "var(--color-muted)",
-                                                transition: "color 0.3s ease",
-                                            }}>
-                                                <span style={{
-                                                    display: "inline-flex",
-                                                    alignItems: "center",
-                                                    justifyContent: "center",
-                                                    width: "1.125rem",
-                                                    height: "1.125rem",
-                                                    borderRadius: "50%",
-                                                    backgroundColor: rule.valid ? "rgba(16, 185, 129, 0.15)" : "transparent",
-                                                    border: rule.valid ? "1px solid rgba(16, 185, 129, 0.3)" : "1px solid var(--color-border)",
-                                                    transition: "all 0.3s ease"
-                                                }}>
-                                                    {rule.valid ? "✓" : ""}
-                                                </span>
-                                                {rule.label}
-                                            </div>
-                                        ))}
-                                    </div>
-                                )}
-                            </div>
+    try {
+      const response = await fetchWithCsrf("/api/auth/reset-password", {
+        method: "POST",
+        body: JSON.stringify({ token, password }),
+      });
+      const data = await response.json();
 
-                            <div style={{ marginBottom: "1.5rem" }}>
-                                <label htmlFor="confirmPassword" style={{ display: "block", fontSize: "0.8125rem", fontWeight: 600, color: "var(--color-muted)", marginBottom: "0.5rem" }}>
-                                    确认密码
-                                </label>
-                                <input
-                                    id="confirmPassword"
-                                    type="password"
-                                    required
-                                    className="form-input"
-                                    placeholder="再次输入新密码"
-                                    value={confirmPassword}
-                                    onChange={(e) => setConfirmPassword(e.target.value)}
-                                    disabled={!token}
-                                    style={{ 
-                                        width: "100%", 
-                                        background: "var(--color-bg)", 
-                                        border: "1px solid var(--color-border)", 
-                                        borderRadius: "0.5rem", 
-                                        color: "var(--color-text)", 
-                                        padding: "0.75rem", 
-                                        outline: "none" 
-                                    }}
-                                />
-                            </div>
+      if (response.ok) {
+        setSuccessMsg(data.message || "密码重置成功，即将返回登录页。");
+      } else {
+        setErrorMsg(data.error || "重置失败，请稍后重试。");
+      }
+    } catch {
+      setErrorMsg("网络请求失败，请稍后重试。");
+    } finally {
+      setLoading(false);
+    }
+  };
 
-                            {errorMsg && (
-                                <p style={{ color: "#f87171", fontSize: "0.875rem", marginBottom: "1.25rem", textAlign: "center" }}>
-                                    {errorMsg}
-                                </p>
-                            )}
-
-                            <button
-                                type="submit"
-                                className="btn-primary"
-                                disabled={loading || !token}
-                                style={{ width: "100%", justifyContent: "center", padding: "0.875rem", fontSize: "1rem" }}
-                            >
-                                {loading ? "重置中..." : "重置密码"}
-                            </button>
-                        </form>
-                    )}
-
-                    <div style={{ marginTop: "1.5rem", textAlign: "center", fontSize: "0.875rem", color: "var(--color-muted)" }}>
-                        <Link href="/login" style={{ color: "var(--color-primary)", fontWeight: 600 }}>
-                            返回登录
-                        </Link>
-                    </div>
-                </div>
-            </main>
+  return (
+    <AuthShell title="设置新密码">
+      {successMsg ? (
+        <div className="rounded-[1.5rem] border border-emerald-400/20 bg-emerald-500/10 p-5">
+          <p className="text-sm font-semibold text-emerald-300">{successMsg}</p>
+          <p className="mt-2 text-sm text-slate-400">
+            页面会在 3 秒后自动跳转到登录页。
+          </p>
         </div>
-    );
+      ) : (
+        <form onSubmit={handleSubmit} noValidate className="space-y-5">
+          <div className="space-y-2">
+            <label
+              htmlFor="password"
+              className="block text-sm font-semibold text-slate-300"
+            >
+              新密码
+            </label>
+            <input
+              id="password"
+              type="password"
+              required
+              autoComplete="new-password"
+              className="form-input"
+              placeholder="输入新密码"
+              value={password}
+              disabled={!token}
+              onChange={(event) => setPassword(event.target.value)}
+            />
+
+            {password ? (
+              <div className="fade-in space-y-2 rounded-[1.25rem] border border-white/10 bg-white/5 p-4">
+                {passwordRules.map((rule) => (
+                  <div
+                    key={rule.label}
+                    className="flex items-center gap-3 text-xs"
+                  >
+                    <span
+                      className={`flex h-[18px] w-[18px] items-center justify-center rounded-full border ${
+                        rule.valid
+                          ? "border-emerald-400/40 bg-emerald-500/15 text-emerald-300"
+                          : "border-white/10 text-slate-500"
+                      }`}
+                    >
+                      {rule.valid ? "✓" : ""}
+                    </span>
+                    <span
+                      className={
+                        rule.valid ? "text-emerald-300" : "text-slate-400"
+                      }
+                    >
+                      {rule.label}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </div>
+
+          <div className="space-y-2">
+            <label
+              htmlFor="confirmPassword"
+              className="block text-sm font-semibold text-slate-300"
+            >
+              确认密码
+            </label>
+            <input
+              id="confirmPassword"
+              type="password"
+              required
+              autoComplete="new-password"
+              className="form-input"
+              placeholder="再次输入新密码"
+              value={confirmPassword}
+              disabled={!token}
+              onChange={(event) => setConfirmPassword(event.target.value)}
+            />
+          </div>
+
+          {errorMsg ? (
+            <p className="text-sm text-rose-300">{errorMsg}</p>
+          ) : null}
+
+          <button
+            type="submit"
+            className="btn-primary w-full justify-center text-base"
+            disabled={loading || !token}
+          >
+            {loading ? "重置中..." : "确认重置密码"}
+          </button>
+        </form>
+      )}
+
+      <Link
+        href="/login"
+        className="text-sm font-semibold text-blue-300 transition-colors hover:text-blue-200"
+      >
+        返回登录
+      </Link>
+    </AuthShell>
+  );
 }
 
 export default function ResetPasswordPage() {
-    return (
-        <Suspense fallback={
-            <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                <div style={{ color: "var(--color-muted)" }}>加载中...</div>
-            </div>
-        }>
-            <ResetPasswordForm />
-        </Suspense>
-    );
+  return (
+    <Suspense
+      fallback={
+        <div className="flex min-h-screen items-center justify-center px-6 text-sm text-slate-400">
+          正在加载重置流程...
+        </div>
+      }
+    >
+      <ResetPasswordForm />
+    </Suspense>
+  );
 }

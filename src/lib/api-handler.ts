@@ -2,98 +2,140 @@ import { NextRequest, NextResponse } from "next/server";
 import { AppError } from "./errors";
 import { API_TIMEOUT_CONFIG } from "@/config";
 
-/** 
- * 定义统一的 API 处理函数类型 
- * 包含对 Next.js App Router Params 的支持
- */
 type ApiHandler<T = unknown> = (
-    req: NextRequest,
-    ctx: T
+  req: NextRequest,
+  ctx: T,
 ) => Promise<NextResponse | Response>;
 
-/**
- * API 处理器选项
- */
 interface ApiHandlerOptions {
-    /** 请求超时时间（毫秒），默认 30 秒 */
-    timeout?: number;
-    /** 最大请求体大小（字节），默认 5MB */
-    maxBodySize?: number;
+  timeout?: number;
+  maxBodySize?: number;
 }
 
-const DEFAULT_MAX_BODY_SIZE = 5 * 1024 * 1024; // 默认限制 5MB
+const DEFAULT_MAX_BODY_SIZE = 5 * 1024 * 1024;
+const WRITE_METHODS = new Set(["POST", "PUT", "DELETE", "PATCH"]);
 
-/**
- * 创建带超时的 Promise
- */
 function withTimeout<T>(
-    promise: Promise<T>,
-    timeoutMs: number,
-    errorMessage: string = "请求超时"
+  promise: Promise<T>,
+  timeoutMs: number,
+  errorMessage: string = "请求超时",
 ): Promise<T> {
-    return Promise.race([
-        promise,
-        new Promise<T>((_, reject) =>
-            setTimeout(() => reject(new AppError(errorMessage, 408)), timeoutMs)
-        ),
-    ]);
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new AppError(errorMessage, 408)), timeoutMs),
+    ),
+  ]);
+}
+
+async function isRequestBodyWithinLimit(
+  req: NextRequest,
+  maxBodySize: number,
+): Promise<boolean> {
+  const contentLengthHeader = req.headers.get("content-length");
+  const parsedContentLength =
+    contentLengthHeader === null
+      ? Number.NaN
+      : Number.parseInt(contentLengthHeader, 10);
+  const hasValidContentLength =
+    Number.isFinite(parsedContentLength) && parsedContentLength >= 0;
+
+  if (hasValidContentLength) {
+    return parsedContentLength <= maxBodySize;
+  }
+
+  if (!WRITE_METHODS.has(req.method)) {
+    return true;
+  }
+
+  const reader = req.clone().body?.getReader();
+  if (!reader) {
+    return true;
+  }
+
+  let totalBytes = 0;
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        return true;
+      }
+
+      totalBytes += value.byteLength;
+      if (totalBytes > maxBodySize) {
+        return false;
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
 }
 
 export function withApiHandler<T = unknown>(
-    handler: ApiHandler<T>,
-    options: ApiHandlerOptions = {}
+  handler: ApiHandler<T>,
+  options: ApiHandlerOptions = {},
 ) {
-    const {
-        timeout = API_TIMEOUT_CONFIG.DEFAULT,
-        maxBodySize = DEFAULT_MAX_BODY_SIZE,
-    } = options;
+  const {
+    timeout = API_TIMEOUT_CONFIG.DEFAULT,
+    maxBodySize = DEFAULT_MAX_BODY_SIZE,
+  } = options;
 
-    return async (req: NextRequest, ctx: T) => {
-        try {
-            // 基础安全性校验：请求体大小限制
-            const contentLength = parseInt(req.headers.get("content-length") || "0", 10);
-            if (contentLength > maxBodySize) {
-                return NextResponse.json(
-                    { error: "Payload Too Large: 请求体大小超过限制" },
-                    { status: 413 }
-                );
-            }
-
-            // 应用超时控制
-            return await withTimeout(
-                handler(req, ctx),
-                timeout,
-                `请求超时（${timeout}ms）`
+  return async (req: NextRequest, ctx: T) => {
+    try {
+      return await withTimeout(
+        (async () => {
+          const isWithinLimit = await isRequestBodyWithinLimit(
+            req,
+            maxBodySize,
+          );
+          if (!isWithinLimit) {
+            return NextResponse.json(
+              { error: "Payload Too Large: 请求体大小超过限制" },
+              { status: 413 },
             );
-        } catch (error: unknown) {
-            const message = error instanceof Error ? error.message : "Internal Server Error";
-            const stack = error instanceof Error ? error.stack : undefined;
-            const cause = error instanceof Error ? (error as Error & { cause?: unknown }).cause : undefined;
-            const code = (error as { code?: string })?.code;
+          }
 
-            // 开发环境记录详细错误信息
-            if (process.env.NODE_ENV === "development") {
-                console.error("[API ERROR]", { message, stack, cause });
-            } else {
-                // 生产环境只记录错误消息
-                console.error("[API ERROR]", message);
-            }
+          return handler(req, ctx);
+        })(),
+        timeout,
+        `请求超时（${timeout}ms）`,
+      );
+    } catch (error: unknown) {
+      const message =
+        error instanceof Error ? error.message : "Internal Server Error";
+      const stack = error instanceof Error ? error.stack : undefined;
+      const cause =
+        error instanceof Error
+          ? (error as Error & { cause?: unknown }).cause
+          : undefined;
+      const code = (error as { code?: string })?.code;
 
-            // 1. 优先处理类型化业务错误
-            if (error instanceof AppError) {
-                return NextResponse.json({ error: error.message }, { status: error.statusCode });
-            }
+      if (process.env.NODE_ENV === "development") {
+        console.error("[API ERROR]", { message, stack, cause });
+      } else {
+        console.error("[API ERROR]", message);
+      }
 
-            // 2. Prisma 记录不存在
-            if (code === 'P2025') {
-                return NextResponse.json({ error: "请求的资源不存在" }, { status: 404 });
-            }
+      if (error instanceof AppError) {
+        return NextResponse.json(
+          { error: error.message },
+          { status: error.statusCode },
+        );
+      }
 
-            // 3. 开发环境返回具体消息，生产环境返回通用消息
-            const isDev = process.env.NODE_ENV !== "production";
-            return NextResponse.json({ 
-                error: isDev ? message : "Internal Server Error"
-            }, { status: 500 });
-        }
-    };
+      if (code === "P2025") {
+        return NextResponse.json(
+          { error: "请求的资源不存在" },
+          { status: 404 },
+        );
+      }
+
+      const isDev = process.env.NODE_ENV !== "production";
+      return NextResponse.json(
+        { error: isDev ? message : "Internal Server Error" },
+        { status: 500 },
+      );
+    }
+  };
 }
