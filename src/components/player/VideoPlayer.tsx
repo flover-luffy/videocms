@@ -8,6 +8,13 @@ import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { fetchWithCsrf } from "@/lib/fetch-client";
 import ExternalPlayerLinks from "./ExternalPlayerLinks";
+import DanmakuLayer, {
+  type DanmakuData,
+  type DanmakuSettings,
+  DANMAKU_DEFAULT_SETTINGS,
+} from "./DanmakuLayer";
+import DanmakuInput from "./DanmakuInput";
+import WatchTogether from "./WatchTogether";
 
 interface Subtitle {
   url: string;
@@ -71,6 +78,18 @@ const VideoPlayer = ({
   const [isPip, setIsPip] = useState(false);
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
 
+  // ── 弹幕状态 ──
+  const [danmakuList, setDanmakuList] = useState<DanmakuData[]>([]);
+  const [danmakuSettings, setDanmakuSettings] = useState<DanmakuSettings>(
+    DANMAKU_DEFAULT_SETTINGS,
+  );
+  const [realtimeDanmaku, setRealtimeDanmaku] = useState<DanmakuData | null>(
+    null,
+  );
+  const [playerDimensions, setPlayerDimensions] = useState({ w: 0, h: 0 });
+  const [watchTogetherUserId, setWatchTogetherUserId] = useState<number | undefined>();
+  const [watchTogetherEmail, setWatchTogetherEmail] = useState<string | undefined>();
+
   const controlsTimerRef = useRef<NodeJS.Timeout | null>(null);
   const screenshotTimerRef = useRef<NodeJS.Timeout | null>(null);
   const feedbackTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -124,6 +143,77 @@ const VideoPlayer = ({
   useEffect(() => {
     fetchPlayData();
   }, [fetchPlayData]);
+
+  // ── 加载弹幕数据 ──
+  useEffect(() => {
+    const loadDanmakus = async () => {
+      try {
+        const res = await fetch(`/api/danmaku?episodeId=${episodeId}`);
+        if (res.ok) {
+          const result = await res.json();
+          if (result.data && Array.isArray(result.data)) {
+            setDanmakuList(result.data);
+          }
+        }
+      } catch (err) {
+        console.warn("[Player] 弹幕加载失败:", err);
+      }
+    };
+    loadDanmakus();
+  }, [episodeId]);
+
+  // ── 获取用户信息（用于一起看 WebSocket 连接） ──
+  useEffect(() => {
+    const loadUserInfo = async () => {
+      try {
+        const res = await fetch("/api/auth/me");
+        if (res.ok) {
+          const data = await res.json();
+          if (data.user?.id && data.user?.email) {
+            setWatchTogetherUserId(data.user.id);
+            setWatchTogetherEmail(data.user.email);
+          }
+        }
+      } catch {
+        // 未登录用户静默忽略
+      }
+    };
+    loadUserInfo();
+  }, []);
+
+  // ── 监控播放器容器尺寸 ──
+  useEffect(() => {
+    if (!playerWrapperRef.current) return;
+    const updateDimensions = () => {
+      if (playerWrapperRef.current) {
+        setPlayerDimensions({
+          w: playerWrapperRef.current.clientWidth,
+          h: playerWrapperRef.current.clientHeight,
+        });
+      }
+    };
+    updateDimensions();
+    const observer = new ResizeObserver(updateDimensions);
+    observer.observe(playerWrapperRef.current);
+    return () => observer.disconnect();
+  }, []);
+
+  const handleDanmakuSettingsChange = useCallback(
+    (patch: Partial<DanmakuSettings>) => {
+      setDanmakuSettings((prev) => ({ ...prev, ...patch }));
+    },
+    [],
+  );
+
+  const handleDanmakuSent = useCallback(
+    (danmaku: DanmakuData) => {
+      setDanmakuList((prev) => [...prev, danmaku]);
+      setRealtimeDanmaku(danmaku);
+      // 清空实时推入，避免重复
+      setTimeout(() => setRealtimeDanmaku(null), 100);
+    },
+    [],
+  );
 
   useEffect(() => {
     const handleFullscreenChange = () => {
@@ -698,6 +788,18 @@ const VideoPlayer = ({
         }
       >
         <div ref={containerRef} className="w-full h-full z-0" />
+        {/* 弹幕渲染层 */}
+        {playerDimensions.w > 0 && playerDimensions.h > 0 && (
+          <DanmakuLayer
+            danmakus={danmakuList}
+            currentTime={currentTime}
+            isPlaying={isPlaying}
+            containerWidth={playerDimensions.w}
+            containerHeight={playerDimensions.h}
+            settings={danmakuSettings}
+            realtimeDanmaku={realtimeDanmaku}
+          />
+        )}
         <div aria-live="polite" className="sr-only">
           {feedbackMessage || ""}
         </div>
@@ -1215,6 +1317,30 @@ const VideoPlayer = ({
                         <span className="hidden sm:inline">设置</span>
                       </button>
 
+                      {/* 一起看 */}
+                      <WatchTogether
+                        seriesId={seriesId}
+                        episodeId={episodeId}
+                        currentUserId={watchTogetherUserId}
+                        currentEmail={watchTogetherEmail}
+                        currentTime={currentTime}
+                        onSyncPlay={() => {
+                          if (artRef.current) artRef.current.play();
+                        }}
+                        onSyncPause={() => {
+                          if (artRef.current) artRef.current.pause();
+                        }}
+                        onSyncSeek={(time) => {
+                          if (artRef.current) {
+                            artRef.current.currentTime = time;
+                            setCurrentTime(time);
+                          }
+                        }}
+                        onSyncEpisode={(epId) => {
+                          router.push(`/play/${seriesId}/${epId}`);
+                        }}
+                      />
+
                       <button
                         type="button"
                         onClick={handleToggleFullscreen}
@@ -1241,8 +1367,22 @@ const VideoPlayer = ({
         </div>
       </div>
 
-      {!isFullscreen && (
+      {/* 弹幕输入栏 */}
+      {!error && videoInfo && (
         <div className="relative px-3 sm:px-4 pt-2 pb-1">
+          <DanmakuInput
+            episodeId={episodeId}
+            currentTime={currentTime}
+            isFullscreen={isFullscreen}
+            settings={danmakuSettings}
+            onSettingsChange={handleDanmakuSettingsChange}
+            onDanmakuSent={handleDanmakuSent}
+          />
+        </div>
+      )}
+
+      {!isFullscreen && (
+        <div className="relative px-3 sm:px-4 pt-1 pb-1">
           <AnimatePresence>
             {videoInfo && !error && (
               <motion.div

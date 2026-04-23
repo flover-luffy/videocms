@@ -77,6 +77,9 @@ export default function ConfigTab() {
     try {
       const res = await fetchWithCsrf("/api/admin/configs", {
         method: "POST",
+        headers: {
+          "Idempotency-Key": crypto.randomUUID(),
+        },
         body: JSON.stringify(newConfig),
       });
       const data = await res.json();

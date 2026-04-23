@@ -19,10 +19,7 @@ export function parseIntId(value: string | undefined): number {
 /**
  * 安全地验证和解析字符串 ID 参数（UUID 或 slug）
  */
-export function parseStringId(
-  value: string | undefined,
-  pattern?: RegExp,
-): string {
+export function parseStringId(value: string | undefined, pattern?: RegExp): string {
   if (!value) {
     throw new Error("缺少 ID 参数");
   }
@@ -47,7 +44,7 @@ export interface PaginationParams {
 export function parsePaginationParams(
   pageStr?: string,
   limitStr?: string,
-  maxLimit: number = 100,
+  maxLimit: number = 100
 ): PaginationParams {
   const page = Math.max(1, parseInt(pageStr ?? "1", 10));
   const limit = Math.min(maxLimit, Math.max(1, parseInt(limitStr ?? "20", 10)));
@@ -65,7 +62,7 @@ export function parsePaginationParams(
 export function parseEnum<T extends string>(
   value: string | undefined,
   validValues: readonly T[],
-  defaultValue?: T,
+  defaultValue?: T
 ): T {
   if (!value) {
     if (defaultValue) return defaultValue;
@@ -82,10 +79,7 @@ export function parseEnum<T extends string>(
 /**
  * 验证布尔值参数
  */
-export function parseBoolean(
-  value: string | undefined,
-  defaultValue: boolean = false,
-): boolean {
+export function parseBoolean(value: string | undefined, defaultValue: boolean = false): boolean {
   if (!value) return defaultValue;
   return value.toLowerCase() === "true" || value === "1";
 }

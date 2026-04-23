@@ -10,6 +10,7 @@ services:
     container_name: videocms_app
     ports:
       - "3001:3000"
+      - "3010:3010"  # 一起看 WebSocket 端口
     volumes:
       - backups:/app/backups
     env_file:

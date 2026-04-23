@@ -1,6 +1,6 @@
 "use client";
 
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence, Variants } from "framer-motion";
 import Image from "next/image";
 import Link from "next/link";
 
@@ -23,7 +23,7 @@ interface HeroBannerDesktopProps {
   paginate: (direction: number) => void;
   setPage: (updater: (current: [number, number]) => [number, number]) => void;
   reduceMotion: boolean;
-  variants: unknown;
+  variants: Variants;
   swipePower: (offset: number, velocity: number) => number;
   swipeConfidenceThreshold: number;
 }

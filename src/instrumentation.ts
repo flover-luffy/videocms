@@ -37,7 +37,12 @@ export async function register() {
     }
 
     // 3. 启动后台定时任务
-    const { startScheduler } = await import("@/lib/scheduler");
-    startScheduler();
+    try {
+      const { startScheduler } = await import("@/lib/scheduler");
+      startScheduler();
+      console.info("✅ 后台定时扫描任务已成功启动");
+    } catch (schedulerErr) {
+      console.error("❌ 后台定时任务启动失败:", schedulerErr);
+    }
   }
 }

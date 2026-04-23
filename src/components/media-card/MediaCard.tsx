@@ -21,7 +21,6 @@ export default function MediaCard({
   voteAverage,
   year,
   episodeCount,
-  _type,
 }: MediaCardProps) {
   return (
     <motion.div

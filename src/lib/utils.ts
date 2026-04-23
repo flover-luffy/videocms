@@ -108,7 +108,7 @@ export function parseTmdbMetadata(tmdbData: unknown): TmdbParsedMetadata {
         .filter(Boolean)
     : [];
 
-  const rawStatus = data.status || "";
+  const rawStatus = typeof data.status === "string" ? data.status : "";
   let statusLabel = "";
   switch (rawStatus.toLowerCase()) {
     case "ended":
@@ -137,18 +137,19 @@ export function parseTmdbMetadata(tmdbData: unknown): TmdbParsedMetadata {
       break;
   }
 
-  const releaseDate = data.first_air_date || data.release_date || "";
+  const getString = (val: unknown) => typeof val === "string" ? val : "";
+  const releaseDate = getString(data.first_air_date) || getString(data.release_date);
   const runtime =
     Array.isArray(data.episode_run_time) && data.episode_run_time.length > 0
       ? data.episode_run_time[0]
       : data.runtime || 0;
 
   return {
-    originalTitle: data.original_name || data.original_title || "",
+    originalTitle: getString(data.original_name) || getString(data.original_title),
     status: rawStatus,
     statusLabel,
     releaseDate,
-    tagline: data.tagline || "",
+    tagline: getString(data.tagline),
     networks,
     productionCompanies,
     directors,

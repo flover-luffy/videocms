@@ -12,8 +12,6 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     ".venv/**",
-    "src/generated/**",
-    "*.js"
   ]),
   {
     settings: {
@@ -22,11 +20,9 @@ const eslintConfig = defineConfig([
       },
     },
     rules: {
-      "@typescript-eslint/no-explicit-any": "warn",
-      "@typescript-eslint/ban-ts-comment": "warn",
-      "@typescript-eslint/no-require-imports": "warn",
+      "@typescript-eslint/no-explicit-any": "error",
+      "@typescript-eslint/ban-ts-comment": "error",
       "react-hooks/exhaustive-deps": "warn",
-      "react/no-unescaped-entities": "warn",
       "prefer-const": "error",
       "@typescript-eslint/no-unused-vars": ["error", { argsIgnorePattern: "^_" }],
       "no-console": ["warn", { allow: ["error", "warn", "info"] }],

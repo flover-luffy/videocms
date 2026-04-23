@@ -1,8 +1,13 @@
 import os
 import shlex
 import sys
+import io
 import tarfile
 import time
+
+if sys.stdout.encoding and sys.stdout.encoding.lower() != 'utf-8':
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
 import paramiko
 from dotenv import load_dotenv
@@ -45,6 +50,7 @@ EXCLUDE_FILES = {
     SOURCE_TAR,
     ".DS_Store",
     ".env.example",
+    ".env.local",
     "deploy.py",
     "test-output.txt",
     "test_connection.py",
@@ -273,11 +279,13 @@ def main():
             banner_timeout=60,
             auth_timeout=60,
         )
+        # 防止 Next.js 漫长无输出的编译过程触发 NAT 空闲超时（通常为 300 秒）
+        ssh.get_transport().set_keepalive(30)
         print_success("SSH connection established")
 
         run_remote_command(
             ssh,
-            f"rm -rf {shlex.quote(REMOTE_DEPLOY_DIR)} && mkdir -p {shlex.quote(REMOTE_DEPLOY_DIR)}",
+            f"mkdir -p {shlex.quote(REMOTE_DEPLOY_DIR)}",
             description="Preparing remote deployment directory...",
         )
 
@@ -288,31 +296,47 @@ def main():
             print("\n  > Synced .env")
             print_success("Upload completed")
 
+        # 清理远端旧源码，避免上次残留的文件污染本次构建
+        run_remote_command(
+            ssh,
+            cd_remote(
+                "find . -maxdepth 1 "
+                "! -name 'docker-compose.yml' "
+                "! -name '.env' "
+                f"! -name {shlex.quote(SOURCE_TAR)} "
+                "! -name '.' "
+                "-exec rm -rf {} +"
+            ),
+            description="Cleaning stale files from previous deployment...",
+        )
         run_remote_command(
             ssh,
             cd_remote(f"tar -xzf {shlex.quote(SOURCE_TAR)}"),
             description="Extracting uploaded source...",
         )
-        run_remote_command(
-            ssh,
-            cd_remote(
-                f"docker compose -p {COMPOSE_PROJECT} stop {APP_SERVICE} 2>/dev/null || true"
-            ),
-            description="Stopping previous app container...",
-        )
+        # [增量更新优化] 移除了 build 前的 down 操作，以实现无停机部署 (Zero-Downtime)
         run_remote_command(
             ssh,
             cd_remote(
                 "export DOCKER_BUILDKIT=1 && "
-                f"docker compose -p {COMPOSE_PROJECT} build --no-cache --progress=plain {APP_SERVICE}"
+                f"docker compose -p {COMPOSE_PROJECT} build --progress=plain {APP_SERVICE}"
             ),
-            description="Building app image...",
+            description="[Zero-Downtime Pre-build] Building new app image while service is still running...",
             stream=True,
+        )
+        # [增量更新优化] 移除了启动前的 down 操作，docker compose up -d 会自动平滑替换
+        run_remote_command(
+            ssh,
+            cd_remote(
+                "docker builder prune -f && "
+                f"docker rmi -f $(docker images -q {COMPOSE_PROJECT}-* --filter 'dangling=true' 2>/dev/null) 2>/dev/null || true"
+            ),
+            description="[Cleanup] Pruning build cache and dangling images...",
         )
         run_remote_command(
             ssh,
             cd_remote(f"docker compose -p {COMPOSE_PROJECT} up -d"),
-            description="Starting compose stack...",
+            description="[Switch] Starting new containers with latest images...",
         )
         stack_started = True
 

@@ -150,7 +150,7 @@ export class OpenListClient {
           password: "",
           page: 1,
           per_page: 0,
-          refresh: false,
+          refresh: true,
         });
 
         if (resp.code !== 200) {

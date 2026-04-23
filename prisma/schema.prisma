@@ -62,6 +62,7 @@ model Series {
   episodes        Episode[]
   favorites       Favorite[]
   playEvents      PlayEvent[]
+  watchRooms      WatchRoom[]
 
   @@unique([openlistConfigId, sourcePath])
 }
@@ -80,6 +81,8 @@ model Episode {
   series      Series     @relation(fields: [seriesId], references: [id], onDelete: Cascade)
   seriesId    Int
   progress    WatchProgress[]
+  danmakus    Danmaku[]
+  watchRooms  WatchRoom[]
 
   @@unique([seriesId, seasonNum, episodeNum])
 }
@@ -132,6 +135,9 @@ model User {
   progress            WatchProgress[]
   favorites           Favorite[]
   passwordResetTokens PasswordResetToken[]
+  danmakus            Danmaku[]
+  hostedRooms         WatchRoom[]       @relation("RoomHost")
+  roomMemberships     WatchRoomMember[]
 }
 
 // ── 观看进度(云端同步) ─────────────────────────────
@@ -230,5 +236,60 @@ model PasswordResetToken {
   userId    Int
 
   @@index([token])
+  @@index([userId])
+}
+
+// ── 弹幕 ──────────────────────────────────────────
+model Danmaku {
+  id        Int      @id @default(autoincrement())
+  text      String   @db.VarChar(200)   // 弹幕文本（限制 200 字）
+  time      Float                       // 出现在视频中的秒数
+  color     String   @default("#FFFFFF") // 弹幕颜色（十六进制）
+  type      Int      @default(0)        // 0=滚动, 1=顶部固定, 2=底部固定
+  fontSize  Int      @default(25)       // 字号（像素）
+  createdAt DateTime @default(now())
+
+  episode   Episode  @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+  episodeId Int
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  userId    Int?
+
+  @@index([episodeId, time])
+  @@index([userId])
+}
+
+// ── 一起看房间 ────────────────────────────────────
+model WatchRoom {
+  id          String   @id @default(cuid())  // 短ID，方便分享
+  name        String   @default("一起看")
+  status      String   @default("waiting")   // waiting | playing | paused | closed
+  currentTime Float    @default(0)           // 当前同步播放位置（秒）
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  host        User     @relation("RoomHost", fields: [hostId], references: [id], onDelete: Cascade)
+  hostId      Int
+  series      Series   @relation(fields: [seriesId], references: [id], onDelete: Cascade)
+  seriesId    Int
+  episode     Episode  @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+  episodeId   Int
+
+  members     WatchRoomMember[]
+
+  @@index([hostId])
+  @@index([status])
+}
+
+// ── 一起看房间成员 ────────────────────────────────
+model WatchRoomMember {
+  id        Int      @id @default(autoincrement())
+  joinedAt  DateTime @default(now())
+
+  room      WatchRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  roomId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    Int
+
+  @@unique([roomId, userId])
   @@index([userId])
 }

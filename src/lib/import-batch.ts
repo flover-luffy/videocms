@@ -1,7 +1,7 @@
 type PrismaDelegate = {
-  findMany?: (...args: unknown[]) => unknown;
-  createMany?: (...args: unknown[]) => unknown;
-  update?: (...args: unknown[]) => unknown;
+  findMany: (args: Record<string, unknown>) => Promise<Record<string, unknown>[]>;
+  createMany: (args: Record<string, unknown>) => Promise<{count: number}>;
+  update: (args: Record<string, unknown>) => Promise<Record<string, unknown>>;
 };
 /**
  * 批量导入优化工具库
@@ -70,7 +70,7 @@ export async function batchProcess<T>(
  * );
  */
 export async function batchCheckExisting(
-  model: PrismaDelegate,
+  model: unknown,
   uniqueField: string,
   where: Record<string, unknown>,
   pathField: string,
@@ -78,7 +78,7 @@ export async function batchCheckExisting(
 ) {
   if (paths.length === 0) return new Set<string>();
 
-  const existing = await model.findMany({
+  const existing = await (model as PrismaDelegate).findMany({
     where: {
       ...where,
       [pathField]: { in: paths },
@@ -101,7 +101,7 @@ export async function batchCheckExisting(
  * );
  */
 export async function batchCreateUnique<T extends Record<string, unknown>>(
-  model: PrismaDelegate,
+  model: unknown,
   data: T[],
   config: BatchImportConfig & { uniqueFields?: string[] } = {},
 ) {
@@ -115,7 +115,7 @@ export async function batchCreateUnique<T extends Record<string, unknown>>(
   await batchProcess(
     data,
     async (batch) => {
-      const result = await model.createMany({
+      const result = await (model as PrismaDelegate).createMany({
         data: batch,
         skipDuplicates,
       });
@@ -137,7 +137,7 @@ export async function batchCreateUnique<T extends Record<string, unknown>>(
  * );
  */
 export async function batchUpdate<T extends Record<string, unknown>>(
-  model: PrismaDelegate,
+  model: unknown,
   updates: T[],
   idField: string = "id",
   config: BatchImportConfig = {},
@@ -154,7 +154,7 @@ export async function batchUpdate<T extends Record<string, unknown>>(
         delete data[idField];
 
         try {
-          await model.update({
+          await (model as PrismaDelegate).update({
             where: { [idField]: id },
             data,
           });
@@ -180,7 +180,7 @@ export async function batchUpdate<T extends Record<string, unknown>>(
  */
 export async function parallelBatchOps(
   operations: Array<{
-    model: PrismaDelegate;
+    model: unknown;
     data: Record<string, unknown>[];
     config?: BatchImportConfig;
   }>,

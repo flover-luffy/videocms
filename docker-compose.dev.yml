@@ -1,0 +1,65 @@
+version: "3.8"
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: deps
+    container_name: videocms_app_dev
+    ports:
+      - "3000:3000"
+      - "3010:3010"
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/.next
+    env_file:
+      - .env.local
+    environment:
+      - NODE_ENV=development
+      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}?connection_limit=5
+      - REDIS_URL=redis://redis:6379/0
+      - NEXT_TELEMETRY_DISABLED=1
+    command: ["sh", "-c", "npx prisma generate && npm run dev:turbo || npm run dev"]
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  db:
+    image: postgres:15-alpine
+    container_name: videocms_db_dev
+    environment:
+      - POSTGRES_USER=rom
+      - POSTGRES_PASSWORD=123.abc456*
+      - POSTGRES_DB=videocms
+      - TZ=Asia/Shanghai
+    ports:
+      - "54321:5432"
+    volumes:
+      - pgdata_dev:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rom -d videocms"]
+      interval: 10s
+      timeout: 5s
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    container_name: videocms_redis_dev
+    ports:
+      - "63790:6379"
+    volumes:
+      - redisdata_dev:/data
+    command: ["redis-server", "--save", "60", "1", "--loglevel", "warning"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  pgdata_dev:
+  redisdata_dev:

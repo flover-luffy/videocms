@@ -52,6 +52,9 @@ export default function ImportTab() {
     try {
       const res = await fetchWithCsrf("/api/admin/import", {
         method: "POST",
+        headers: {
+          "Idempotency-Key": crypto.randomUUID(),
+        },
         body: JSON.stringify({
           configId: parseInt(importForm.configId, 10),
           path: importForm.path,

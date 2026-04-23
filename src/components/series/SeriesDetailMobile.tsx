@@ -8,7 +8,7 @@ import SectionHeading from "@/components/layout/SectionHeading";
 import FavoriteButton from "@/components/ui/FavoriteButton";
 import { normalizeJsonArray, parseTmdbMetadata } from "@/lib/utils";
 
-export default function SeriesDetailMobile({ series }: { series: unknown }) {
+export default function SeriesDetailMobile({ series }: { series: any }) {
   const genres = normalizeJsonArray(series.genres);
   const tmdbMeta = parseTmdbMetadata(series.tmdbData);
   const firstEpisode = series.episodes[0];

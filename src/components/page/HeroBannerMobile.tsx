@@ -1,6 +1,6 @@
 "use client";
 
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence, Variants } from "framer-motion";
 import Image from "next/image";
 import Link from "next/link";
 
@@ -21,8 +21,8 @@ interface HeroBannerMobileProps {
   itemIndex: number;
   paginate: (direction: number) => void;
   setPage: (updater: (current: [number, number]) => [number, number]) => void;
-  _reduceMotion: boolean;
-  variants: unknown;
+  reduceMotion: boolean;
+  variants: Variants;
   swipePower: (offset: number, velocity: number) => number;
   swipeConfidenceThreshold: number;
 }
@@ -34,7 +34,7 @@ export default function HeroBannerMobile({
   itemIndex,
   paginate,
   setPage,
-  _reduceMotion,
+  reduceMotion,
   variants,
   swipePower,
   swipeConfidenceThreshold,
