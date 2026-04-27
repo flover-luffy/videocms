@@ -1,8 +1,15 @@
 import { NextResponse } from "next/server";
 import { generateCaptcha, setCaptcha } from "@/lib/captcha";
 import { randomUUID } from "node:crypto";
+import { createRateLimiter, RATE_LIMITS } from "@/lib/rate-limit";
+import type { NextRequest } from "next/server";
 
-export async function GET() {
+const rateLimiter = createRateLimiter(RATE_LIMITS.auth);
+
+export async function GET(request: NextRequest) {
+  const rateLimitResponse = await rateLimiter(request);
+  if (rateLimitResponse) return rateLimitResponse;
+
   const { text, data } = generateCaptcha();
   const captchaId = randomUUID();
 
@@ -10,7 +17,7 @@ export async function GET() {
   setCaptcha(captchaId, text);
 
   if (process.env.NODE_ENV === "development") {
-    console.log(
+    console.info(
       `[CAPTCHA] Generating new captcha. ID: ${captchaId}, Text: ${text}`,
     );
   }

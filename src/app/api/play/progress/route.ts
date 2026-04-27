@@ -1,46 +1,39 @@
-import { NextRequest, NextResponse } from "next/server";
+﻿import { NextRequest, NextResponse } from "next/server";
 import { verifyToken } from "@/lib/auth/jwt";
+import { getRequestAuthToken } from "@/lib/auth/request-token";
+import { requireUser } from "@/lib/auth/require-auth";
 import { withApiHandler } from "@/lib/api-handler";
 import { ProgressSchema } from "@/lib/validation";
-
-/**
- * 播放进度同步 API
- * 获取/更新指定集数在当前用户下的播放进度（秒）
- */
-
 import { ProgressService } from "@/services/progress.service";
 
-/**
- * 播放进度同步 API
- * 获取/更新指定集数在当前用户下的播放进度（秒）
- */
-
 export const GET = withApiHandler(async (request: NextRequest) => {
-  const token = request.cookies.get("access_token")?.value;
-  if (!token) return NextResponse.json({ position: 0 });
+  const token = getRequestAuthToken(request);
+  if (!token) {
+    return NextResponse.json({ position: 0 });
+  }
 
   const payload = await verifyToken(token);
-  if (!payload) return NextResponse.json({ position: 0 });
+  if (!payload) {
+    return NextResponse.json({ position: 0 });
+  }
 
   const { searchParams } = new URL(request.url);
   const episodeIdStr = searchParams.get("episodeId");
-  if (!episodeIdStr)
+  if (!episodeIdStr) {
     return NextResponse.json({ error: "Missing episodeId" }, { status: 400 });
+  }
 
-  const episodeId = parseInt(episodeIdStr, 10);
+  const episodeId = Number.parseInt(episodeIdStr, 10);
+  if (!Number.isFinite(episodeId) || episodeId <= 0) {
+    return NextResponse.json({ error: "Invalid episodeId" }, { status: 400 });
+  }
+
   const result = await ProgressService.getProgress(payload.userId, episodeId);
-
   return NextResponse.json(result);
 });
 
 export const POST = withApiHandler(async (request: NextRequest) => {
-  const token = request.cookies.get("access_token")?.value;
-  if (!token)
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-  const payload = await verifyToken(token);
-  if (!payload)
-    return NextResponse.json({ error: "Invalid token" }, { status: 401 });
+  const user = await requireUser(request);
 
   const json = await request.json().catch(() => null);
   const result = ProgressSchema.safeParse(json);
@@ -56,7 +49,7 @@ export const POST = withApiHandler(async (request: NextRequest) => {
   const clientTimestamp = json?.clientTimestamp || Date.now();
 
   await ProgressService.syncProgress(
-    payload.userId,
+    user.userId,
     episodeId,
     position,
     duration,

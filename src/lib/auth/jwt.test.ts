@@ -1,8 +1,6 @@
-import { describe, it, expect, vi } from "vitest";
+import { decodeProtectedHeader } from "jose";
+import { describe, it, expect } from "vitest";
 import { signAccessToken, verifyToken } from "./jwt";
-
-// 模拟环境变量
-vi.stubEnv("JWT_SECRET", "test-secret-key-at-least-32-chars-long");
 
 describe("JWT Auth Utils", () => {
   const payload = { userId: 1, email: "test@example.com", role: "user" };
@@ -11,6 +9,7 @@ describe("JWT Auth Utils", () => {
     const token = await signAccessToken(payload);
     expect(token).toBeDefined();
     expect(typeof token).toBe("string");
+    expect(decodeProtectedHeader(token).alg).toBe("RS256");
 
     const verified = await verifyToken(token);
     expect(verified).toMatchObject({

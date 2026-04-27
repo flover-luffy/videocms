@@ -396,6 +396,83 @@
       font-size: 34px !important;
     }
   }
+
+  /* ======================
+     Video Player Custom UI Overrides
+     ====================== */
+  .player-range-hitbox {
+    -webkit-appearance: none;
+    appearance: none;
+    background: transparent !important;
+    outline: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .player-range-hitbox::-webkit-slider-runnable-track {
+    -webkit-appearance: none;
+    appearance: none;
+    background: transparent;
+    border: 0;
+  }
+  .player-range-hitbox::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 0;
+    height: 0;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+  .player-range-hitbox::-moz-range-track {
+    background: transparent;
+    border: 0;
+  }
+  .player-range-hitbox::-moz-range-thumb {
+    width: 0;
+    height: 0;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+  .player-range-hitbox::-moz-focus-outer {
+    border: 0;
+  }
+  
+  /* 隐藏 Artplayer 原生控件和面板，避免与自定义 UI 冲突重叠 */
+  .art-video-player .art-controls,
+  .art-video-player .art-progress,
+  .art-video-player .art-control-progress,
+  .art-video-player .art-layer-gradient,
+  .art-video-player .art-settings,
+  .art-video-player .art-notice,
+  .art-video-player .art-info,
+  .art-video-player .art-contextmenus,
+  .art-video-player .art-mask {
+    display: none !important;
+  }
+  
+  .art-video-player {
+    background: black !important;
+  }
+  
+  .art-subtitle {
+    bottom: 8% !important;
+    font-size: clamp(14px, calc(var(--player-height) * 0.05), 36px) !important;
+    font-weight: 900 !important;
+    text-shadow: 0 2px 10px rgba(0, 0, 0, 0.9) !important;
+    color: #fff !important;
+    padding: 0 20px !important;
+    transition: all 0.3s ease !important;
+  }
+  
+  :fullscreen .art-subtitle,
+  .art-video-player-fullscreen .art-subtitle {
+    bottom: 10% !important;
+    font-size: clamp(20px, calc(var(--player-height) * 0.08), 54px) !important;
+  }
+  
+  :fullscreen {
+    background-color: black !important;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

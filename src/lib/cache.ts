@@ -6,6 +6,7 @@
  */
 import { LRUCache } from "lru-cache";
 import Redis from "ioredis";
+import { randomUUID } from "node:crypto";
 
 // 缓存接口定义，确保两种实现对外暴露相同的 API
 export interface ICache<T extends object> {
@@ -130,6 +131,7 @@ const shouldUseRedis =
 
 const globalForRedis = globalThis as unknown as {
   redisClient: Redis | undefined;
+  memoryLocks: Map<string, { owner: string; expiresAt: number }> | undefined;
 };
 
 let redisClient: Redis | null = globalForRedis.redisClient || null;
@@ -366,6 +368,54 @@ class CacheManager {
 // 全局缓存管理器实例
 export const cacheManager = new CacheManager();
 
+const memoryLocks = globalForRedis.memoryLocks || new Map<string, { owner: string; expiresAt: number }>();
+if (process.env.NODE_ENV !== "production") {
+  globalForRedis.memoryLocks = memoryLocks;
+}
+
+export async function withDistributedLock<T>(
+  name: string,
+  ttlSeconds: number,
+  task: () => Promise<T>,
+): Promise<T | null> {
+  const key = `videocms:lock:${name}`;
+  const owner = randomUUID();
+
+  if (redisClient) {
+    const acquired = await redisClient.set(key, owner, "EX", ttlSeconds, "NX");
+    if (acquired !== "OK") {
+      return null;
+    }
+
+    try {
+      return await task();
+    } finally {
+      await redisClient.eval(
+        "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end",
+        1,
+        key,
+        owner,
+      );
+    }
+  }
+
+  const now = Date.now();
+  const existing = memoryLocks.get(key);
+  if (existing && existing.expiresAt > now) {
+    return null;
+  }
+
+  memoryLocks.set(key, { owner, expiresAt: now + ttlSeconds * 1000 });
+  try {
+    return await task();
+  } finally {
+    const current = memoryLocks.get(key);
+    if (current?.owner === owner) {
+      memoryLocks.delete(key);
+    }
+  }
+}
+
 // 预定义的缓存实例 (Redis由于没有 maxSize，该参数会被忽略)
 export const tmdbMetadataCache = cacheManager.getCache<object>(
   "tmdbMetadata",
@@ -386,13 +436,26 @@ const sendCodeCacheInstance = cacheManager.getCache<TimestampRecord>(
 export const sendCodeCache = sendCodeCacheInstance;
 
 // ============== 诊断和监控接口 ==============
+function redactConnectionString(value: string | undefined): string {
+  if (!value) return "未配置";
+
+  try {
+    const parsed = new URL(value);
+    if (parsed.password) parsed.password = "***";
+    if (parsed.username) parsed.username = "***";
+    return parsed.toString();
+  } catch {
+    return "[redacted]";
+  }
+}
+
 /**
  * 获取缓存系统诊断信息
  */
 export async function getCacheDiagnostics() {
   return {
     redisConfigured: shouldUseRedis,
-    redisUrl: process.env.REDIS_URL || "未配置",
+    redisUrl: redactConnectionString(process.env.REDIS_URL),
     redisConnected: redisClient ? "是" : "否",
     cacheType: redisClient ? "RedisCache" : "MemoryCache",
     timestamp: new Date().toISOString(),

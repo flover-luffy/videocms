@@ -7,7 +7,7 @@ import { useRouter } from "next/navigation";
 interface Episode {
   id: number;
   episodeNum: number;
-  seasonNum: number;
+  seasonNum: number | null;
   title?: string | null;
 }
 

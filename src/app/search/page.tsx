@@ -7,11 +7,11 @@ import PageHero from "@/components/layout/PageHero";
 import PageLayout from "@/components/layout/PageLayout";
 import SectionHeading from "@/components/layout/SectionHeading";
 import StaggeredList from "@/components/layout/StaggeredList";
-import MediaCard from "@/components/media-card/MediaCard";
+import MediaCard, { type MediaCardProps } from "@/components/media-card/MediaCard";
 
 export default function SearchPage() {
   const [query, setQuery] = useState("");
-  const [results, setResults] = useState<any[]>([]);
+  const [results, setResults] = useState<MediaCardProps[]>([]);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {

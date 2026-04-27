@@ -7,6 +7,24 @@ import {
 } from "@/lib/cache";
 import { requireAdmin } from "@/lib/auth/require-auth";
 
+type CacheTestResult = {
+  testStartTime: string;
+  write?: string;
+  read?: string;
+  dataMatch?: boolean;
+  expected?: object;
+  received?: object | null;
+  cleanup?: string;
+  error?: string;
+  status?: string;
+  cacheSize?: number | string;
+};
+
+type CacheDiagnosticsSummary = {
+  redisConfigured?: boolean;
+  redisConnected?: string;
+};
+
 /**
  * 缓存诊断接口
  * 检查缓存系统是否正常运行，Redis 是否真的生效
@@ -33,7 +51,7 @@ export const GET = withApiHandler(async (request: NextRequest) => {
       random: Math.random(),
     };
 
-    const cacheTest: Record<string, any> = {
+    const cacheTest: CacheTestResult = {
       testStartTime: new Date().toISOString(),
     };
 
@@ -96,8 +114,8 @@ export const GET = withApiHandler(async (request: NextRequest) => {
 });
 
 function getRecommendation(
-  diagnostics: Record<string, any>,
-  cacheTest: Record<string, any>,
+  diagnostics: CacheDiagnosticsSummary,
+  cacheTest: CacheTestResult,
 ): string {
   const issues: string[] = [];
 

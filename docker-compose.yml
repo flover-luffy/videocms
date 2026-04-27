@@ -7,6 +7,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      secrets:
+        - app_env
     container_name: videocms_app
     ports:
       - "3001:3000"
@@ -19,9 +21,9 @@ services:
       - NODE_ENV=production
       # Container-to-container addresses must use compose service names.
       - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}?connection_limit=20&pool_timeout=15
-      - REDIS_URL=redis://redis:6379/0
+      - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD is required}@redis:6379/0
       - NEXT_TELEMETRY_DISABLED=1
-    command: ["sh", "-c", "npx prisma migrate deploy && node server.js"]
+    command: ["sh", "-c", "npx prisma migrate deploy && node start-server.mjs"]
     depends_on:
       db:
         condition: service_healthy
@@ -63,13 +65,22 @@ services:
     image: redis:7-alpine
     container_name: videocms_redis
     restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - REDIS_PASSWORD
     ports:
       - "127.0.0.1:6379:6379"
     volumes:
       - redisdata:/data
-    command: ["redis-server", "--save", "60", "1", "--loglevel", "warning"]
+    command:
+      [
+        "sh",
+        "-c",
+        "redis-server --save 60 1 --loglevel warning --requirepass \"$${REDIS_PASSWORD}\"",
+      ]
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "redis-cli -a \"$${REDIS_PASSWORD}\" ping | grep PONG"]
       interval: 5s
       timeout: 3s
       retries: 5
@@ -78,3 +89,7 @@ volumes:
   pgdata:
   redisdata:
   backups:
+
+secrets:
+  app_env:
+    file: .env

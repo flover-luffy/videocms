@@ -12,6 +12,7 @@ import { ConfigSchema } from "@/lib/validation";
 import { encrypt } from "@/lib/encryption";
 import { requireAdmin } from "@/lib/auth/require-auth";
 import { enforceIdempotency } from "@/lib/idempotency";
+import { assertAllowedOutboundUrl } from "@/lib/url-security";
 
 export const GET = withApiHandler(async (request: NextRequest) => {
   await requireAdmin(request);
@@ -37,9 +38,19 @@ export const POST = withApiHandler(async (request: NextRequest) => {
       );
     }
     const { name, host, token } = result.data;
+    let normalizedHost: string;
+    try {
+      const allowedHost = await assertAllowedOutboundUrl(host);
+      normalizedHost = allowedHost.toString().replace(/\/$/, "");
+    } catch {
+      return NextResponse.json(
+        { error: "不允许的 OpenList Host 地址" },
+        { status: 400 },
+      );
+    }
 
     // 测试连通性
-    const client = createOpenListClient(host, token);
+    const client = createOpenListClient(normalizedHost, token);
     const ok = await client.ping();
     if (!ok) {
       return NextResponse.json(
@@ -51,7 +62,7 @@ export const POST = withApiHandler(async (request: NextRequest) => {
     // 加密 token 后存储
     const encryptedToken = encrypt(token);
     const config = await prisma.openlistConfig.create({
-      data: { name, host: host.replace(/\/$/, ""), token: encryptedToken },
+      data: { name, host: normalizedHost, token: encryptedToken },
     });
 
     return NextResponse.json({

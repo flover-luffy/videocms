@@ -47,7 +47,7 @@ function generateSearchCacheKey(
  */
 export const GET = withApiHandler(async (request: NextRequest) => {
     // 应用速率限制
-    const rateLimitResponse = rateLimiter(request);
+    const rateLimitResponse = await rateLimiter(request);
     if (rateLimitResponse) return rateLimitResponse;
 
     const { searchParams } = new URL(request.url);
@@ -64,11 +64,8 @@ export const GET = withApiHandler(async (request: NextRequest) => {
 
     const { q } = result.data;
 
-    // 获取用户 ID（可选，用于个性化搜索）
-    const userId = request.headers.get("x-user-id");
-
     // 生成规范化的缓存键
-    const cacheKey = generateSearchCacheKey(q, type, page, limit, userId || undefined);
+    const cacheKey = generateSearchCacheKey(q, type, page, limit);
 
     // 尝试从缓存获取
     const cached = await searchCache.get(cacheKey);

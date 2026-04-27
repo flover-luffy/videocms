@@ -1,3 +1,5 @@
+# syntax=docker/dockerfile:1.7
+
 # ---------- 阶段 1：基础环境 ----------
 FROM node:22-slim AS base
 RUN apt-get update && apt-get install -y openssl curl && rm -rf /var/lib/apt/lists/*
@@ -13,13 +15,11 @@ FROM base AS builder
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
-# 关键：手动为构建阶段设置占位符环境变量，绕过 Prisma 静态校验
 ENV NEXT_TELEMETRY_DISABLED=1
-ENV DATABASE_URL="postgresql://postgres:postgres@localhost:5432/videocms"
-ENV SKIP_ENV_VALIDATION=1
 
-# 生成 Prisma Client 并构建应用
-RUN npx prisma generate && npm run build
+# 构建必须通过 BuildKit secret 提供真实 .env，禁止使用任何占位配置。
+RUN --mount=type=secret,id=app_env,target=/app/.env,required=true \
+    npx prisma generate && npm run build
 
 # ---------- 阶段 4：运行时 (runner) ----------
 FROM base AS runner
@@ -40,11 +40,10 @@ COPY --from=builder --chown=nextjs:nodejs /app/prisma.config.ts ./prisma.config.
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/@prisma ./node_modules/@prisma
 
-RUN install -d -o nextjs -g nodejs /app/.next/cache
+# 安装由于 standalone 无法自动 trace 的动态依赖，以及执行迁移用的 Prisma CLI
+RUN npm install ws prisma@7.5.0 tsx --no-save
 
-# 运行时所需的 prisma CLI、tsx 以及配置文件解析依赖 (用于 seed 和 migrate)
-# ws：一起看 WebSocket 服务器
-RUN npm install prisma@7.5.0 tsx@4.21.0 ws@8.18.0
+RUN install -d -o nextjs -g nodejs /app/.next/cache
 
 # 拷贝自定义启动脚本（集成 WebSocket 服务器）
 COPY --from=builder --chown=nextjs:nodejs /app/start-server.mjs ./start-server.mjs

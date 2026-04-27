@@ -41,11 +41,17 @@ export function addSecurityHeaders(
     isPlayPage ? "credentialless" : "unsafe-none",
   );
 
-  // 动态构建 CSP (消除 script-src 的 unsafe-inline 隐患)
-  // 注意：style-src 针对部分内联样式或组件库依然保留 unsafe-inline 以防过度阻断
+  // 动态构建 CSP (生产环境使用 nonce 收紧脚本与样式标签)
   const scriptSrc = isDevelopment
     ? "script-src 'self' 'unsafe-inline' 'unsafe-eval' blob: https://app.glitchtip.com;"
     : `script-src 'self' ${nonce ? `'nonce-${nonce}' 'strict-dynamic'` : "'unsafe-inline'"} blob: https://app.glitchtip.com;`;
+
+  // ⚠️ style-src 必须保留 'unsafe-inline'。
+  // Artplayer (setStyleText → createElement("style"))、Framer Motion 等第三方库
+  // 在运行时通过 JS 动态创建 <style> 标签，无法携带 nonce，
+  // 若移除 'unsafe-inline' 会导致字幕渲染、动画等全部失效。
+  const styleSrc =
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;";
 
   const connectSrc = isDevelopment
     ? "connect-src 'self' http: https: ws: wss: https://app.glitchtip.com;"
@@ -54,7 +60,7 @@ export function addSecurityHeaders(
   const csp = `
         default-src 'self';
         ${scriptSrc}
-        style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
+        ${styleSrc}
         img-src 'self' https: data:;
         font-src 'self' data: https://fonts.gstatic.com;
         ${connectSrc}

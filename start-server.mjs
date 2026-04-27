@@ -19,7 +19,7 @@ const WS_PORT = parseInt(process.env.WS_PORT || "3010", 10);
 
 async function startServer() {
   // 1. 启动 Next.js standalone 服务（子进程）
-  console.log("[StartServer] 启动 Next.js HTTP 服务...");
+  console.info("[StartServer] 启动 Next.js HTTP 服务...");
   const nextProcess = spawn("node", ["server.js"], {
     cwd: __dirname,
     stdio: "inherit",
@@ -65,7 +65,7 @@ async function startServer() {
     if (typeof initWatchRoomWS === "function") {
       initWatchRoomWS(wsHttp);
       wsHttp.listen(WS_PORT, "0.0.0.0", () => {
-        console.log(
+        console.info(
           `[StartServer] ✅ 一起看 WebSocket 服务已启动: ws://0.0.0.0:${WS_PORT}/ws/watch-room`,
         );
       });
@@ -78,7 +78,7 @@ async function startServer() {
 
   // 优雅退出
   const shutdown = (signal) => {
-    console.log(`[StartServer] 收到 ${signal}，正在关闭...`);
+    console.info(`[StartServer] 收到 ${signal}，正在关闭...`);
     nextProcess.kill(signal);
     process.exit(0);
   };

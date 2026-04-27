@@ -38,6 +38,13 @@ export const POST = withApiHandler(async (request: NextRequest) => {
     secure: process.env.NODE_ENV === "production",
     sameSite: "lax",
     maxAge: 0,
+    path: "/api/auth",
+  });
+  res.cookies.set("refresh_token", "", {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    maxAge: 0,
     path: "/",
   });
   res.cookies.set("access_token", "", {

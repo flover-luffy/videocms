@@ -2,45 +2,29 @@ import crypto from "crypto";
 import { ENCRYPTION_CONFIG } from "@/config";
 
 const ALGORITHM = "aes-256-gcm";
-const IV_LENGTH = 16;
+const LEGACY_IV_LENGTH = 16;
+const IV_LENGTH = 12;
+const SALT_LENGTH = 16;
 const KEY_LENGTH = 32;
+const AUTH_TAG_LENGTH = 16;
 const CURRENT_PBKDF2_ITERATIONS = 600_000;
 const LEGACY_PBKDF2_ITERATIONS = [100_000];
+const VERSION = "v2";
+const HEX_REGEX = /^[0-9a-f]+$/i;
 const AUTH_ERROR_HINTS = [
   "Unsupported state",
   "unable to authenticate data",
   "authTag",
 ];
 
-const derivedKeyCache = new Map<number, Buffer>();
-
-function getEncryptionKey(iterations = CURRENT_PBKDF2_ITERATIONS): Buffer {
-  const cachedKey = derivedKeyCache.get(iterations);
-  if (cachedKey) {
-    return cachedKey;
-  }
-
-  const { SECRET, SALT } = ENCRYPTION_CONFIG;
-  const key = crypto.pbkdf2Sync(SECRET, SALT, iterations, KEY_LENGTH, "sha256");
-  derivedKeyCache.set(iterations, key);
-  return key;
-}
-
-function parseCiphertext(ciphertext: string) {
-  const parts = ciphertext.split(":");
-  if (parts.length !== 3) {
-    throw new Error("无效的加密数据格式");
-  }
-
-  const [ivHex, encrypted, tagHex] = parts;
-  const iv = Buffer.from(ivHex, "hex");
-  const tag = Buffer.from(tagHex, "hex");
-
-  if (iv.byteLength !== IV_LENGTH || tag.byteLength !== 16) {
-    throw new Error("无效的加密数据格式");
-  }
-
-  return { iv, encrypted, tag };
+function deriveKey(salt: Buffer, iterations: number): Buffer {
+  return crypto.pbkdf2Sync(
+    ENCRYPTION_CONFIG.SECRET,
+    salt,
+    iterations,
+    KEY_LENGTH,
+    "sha256",
+  );
 }
 
 function decryptWithKey(
@@ -62,33 +46,70 @@ function isAuthError(error: unknown): boolean {
   return AUTH_ERROR_HINTS.some((hint) => message.includes(hint));
 }
 
-export function encrypt(plaintext: string): string {
-  const key = getEncryptionKey();
-  const iv = crypto.randomBytes(IV_LENGTH);
-  const cipher = crypto.createCipheriv(ALGORITHM, key, iv);
+function parseHexPart(value: string, expectedLength?: number): Buffer {
+  if (!value || !HEX_REGEX.test(value)) {
+    throw new Error("Invalid encrypted data format");
+  }
 
-  let encrypted = cipher.update(plaintext, "utf8", "hex");
-  encrypted += cipher.final("hex");
-
-  const tag = cipher.getAuthTag();
-  return `${iv.toString("hex")}:${encrypted}:${tag.toString("hex")}`;
+  const buffer = Buffer.from(value, "hex");
+  if (expectedLength !== undefined && buffer.byteLength !== expectedLength) {
+    throw new Error("Invalid encrypted data format");
+  }
+  return buffer;
 }
 
-export function decrypt(ciphertext: string): string {
-  const { iv, encrypted, tag } = parseCiphertext(ciphertext);
+function decryptV2(ciphertext: string): string {
+  const parts = ciphertext.split(":");
+  if (parts.length !== 6 || parts[0] !== VERSION) {
+    throw new Error("Invalid encrypted data format");
+  }
+
+  const iterations = Number.parseInt(parts[1], 10);
+  if (!Number.isFinite(iterations) || iterations <= 0) {
+    throw new Error("Invalid encrypted data format");
+  }
+
+  const salt = parseHexPart(parts[2], SALT_LENGTH);
+  const iv = parseHexPart(parts[3], IV_LENGTH);
+  const encrypted = parts[4];
+  const tag = parseHexPart(parts[5], AUTH_TAG_LENGTH);
+
+  return decryptWithKey(iv, encrypted, tag, deriveKey(salt, iterations));
+}
+
+function decryptLegacy(ciphertext: string): string {
+  const parts = ciphertext.split(":");
+  if (parts.length !== 3) {
+    throw new Error("Invalid encrypted data format");
+  }
+
+  const [ivHex, encrypted, tagHex] = parts;
+  const iv = parseHexPart(ivHex, LEGACY_IV_LENGTH);
+  const tag = parseHexPart(tagHex, AUTH_TAG_LENGTH);
   const attemptedIterations = [
     CURRENT_PBKDF2_ITERATIONS,
     ...LEGACY_PBKDF2_ITERATIONS,
   ];
+  
+  // Try the current salt from env, and fallback salts used in previous versions
+  const attemptedSalts = [
+    ENCRYPTION_CONFIG.SALT,
+    "fallback-salt",
+    "videocms-salt"
+  ];
+  
   let lastError: unknown;
 
-  for (const iterations of attemptedIterations) {
-    try {
-      return decryptWithKey(iv, encrypted, tag, getEncryptionKey(iterations));
-    } catch (error) {
-      lastError = error;
-      if (!isAuthError(error)) {
-        throw error instanceof Error ? error : new Error(String(error));
+  for (const saltStr of attemptedSalts) {
+    for (const iterations of attemptedIterations) {
+      try {
+        const key = deriveKey(Buffer.from(saltStr), iterations);
+        return decryptWithKey(iv, encrypted, tag, key);
+      } catch (error) {
+        lastError = error;
+        if (!isAuthError(error)) {
+          throw error instanceof Error ? error : new Error(String(error));
+        }
       }
     }
   }
@@ -96,20 +117,54 @@ export function decrypt(ciphertext: string): string {
   const message =
     lastError instanceof Error ? lastError.message : String(lastError);
   console.error(
-    "[Encryption] Decryption failed. Possible causes: key mismatch, tampered data, or changed environment variables.",
+    "[Encryption] Legacy decryption failed. Possible causes: key mismatch, tampered data, or changed environment variables.",
     {
       error: message,
       ciphertextLength: ciphertext.length,
       attemptedIterations,
+      attemptedSalts
     },
   );
 
-  throw new Error(
-    "数据解密认证失败：加密密钥不正确或数据已损坏。请尝试重新保存配置。",
-  );
+  throw new Error("数据解密认证失败：加密密钥不正确或数据已损坏。");
+}
+
+export function encrypt(plaintext: string): string {
+  const salt = crypto.randomBytes(SALT_LENGTH);
+  const iv = crypto.randomBytes(IV_LENGTH);
+  const key = deriveKey(salt, CURRENT_PBKDF2_ITERATIONS);
+  const cipher = crypto.createCipheriv(ALGORITHM, key, iv);
+
+  let encrypted = cipher.update(plaintext, "utf8", "hex");
+  encrypted += cipher.final("hex");
+
+  const tag = cipher.getAuthTag();
+  return [
+    VERSION,
+    String(CURRENT_PBKDF2_ITERATIONS),
+    salt.toString("hex"),
+    iv.toString("hex"),
+    encrypted,
+    tag.toString("hex"),
+  ].join(":");
+}
+
+export function decrypt(ciphertext: string): string {
+  if (ciphertext.startsWith(`${VERSION}:`)) {
+    return decryptV2(ciphertext);
+  }
+  return decryptLegacy(ciphertext);
 }
 
 export function isEncrypted(value: string): boolean {
   const parts = value.split(":");
-  return parts.length === 3 && parts.every((part) => /^[0-9a-f]+$/i.test(part));
+  if (parts.length === 6 && parts[0] === VERSION) {
+    const [, iterations, salt, iv, encrypted, tag] = parts;
+    return (
+      /^\d+$/.test(iterations) &&
+      [salt, iv, encrypted, tag].every((part) => HEX_REGEX.test(part))
+    );
+  }
+
+  return parts.length === 3 && parts.every((part) => HEX_REGEX.test(part));
 }

@@ -3,6 +3,8 @@ import { prisma } from "@/lib/db";
 import { withApiHandler } from "@/lib/api-handler";
 import { encrypt } from "@/lib/encryption";
 import { requireAdmin } from "@/lib/auth/require-auth";
+import { ConfigSchema } from "@/lib/validation";
+import { assertAllowedOutboundUrl } from "@/lib/url-security";
 
 /**
  * DELETE /api/admin/configs/[id]
@@ -64,18 +66,40 @@ export const PUT = withApiHandler(
     }
 
     const body = await request.json().catch(() => null);
-    if (!body || !body.name || !body.host || !body.token) {
-      return NextResponse.json({ error: "参数不完整" }, { status: 400 });
+    const result = ConfigSchema.safeParse(body);
+    if (!result.success) {
+      return NextResponse.json(
+        { error: result.error.issues[0].message },
+        { status: 400 },
+      );
+    }
+
+    const { name, host, token } = result.data;
+    let normalizedHost: string;
+    try {
+      const allowedHost = await assertAllowedOutboundUrl(host);
+      normalizedHost = allowedHost.toString().replace(/\/$/, "");
+    } catch {
+      return NextResponse.json(
+        { error: "不允许的 OpenList Host 地址" },
+        { status: 400 },
+      );
     }
 
     // 加密 token 后更新
-    const encryptedToken = encrypt(body.token);
+    const encryptedToken = encrypt(token);
     const updated = await prisma.openlistConfig.update({
       where: { id: configId },
       data: {
-        name: body.name,
-        host: body.host,
+        name,
+        host: normalizedHost,
         token: encryptedToken,
+      },
+      select: {
+        id: true,
+        name: true,
+        host: true,
+        createdAt: true,
       },
     });
 

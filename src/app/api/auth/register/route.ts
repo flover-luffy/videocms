@@ -1,16 +1,27 @@
 import { NextRequest, NextResponse } from "next/server";
+import { createHash } from "node:crypto";
 import { prisma } from "@/lib/db";
 import { signAccessToken, signRefreshToken } from "@/lib/auth/jwt";
 import bcrypt from "bcryptjs";
 import { withApiHandler } from "@/lib/api-handler";
 import { RegisterSchema } from "@/lib/validation";
 import { setAuthCookies } from "@/lib/auth/cookies";
+import { createRateLimiter, RATE_LIMITS } from "@/lib/rate-limit";
+
+const rateLimiter = createRateLimiter(RATE_LIMITS.auth);
+
+function hashToken(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
+}
 
 /**
  * 用户注册 API
  * POST /api/auth/register
  */
 export const POST = withApiHandler(async (request: NextRequest) => {
+  const rateLimitResponse = await rateLimiter(request);
+  if (rateLimitResponse) return rateLimitResponse;
+
   const json = await request.json().catch(() => null);
   const result = RegisterSchema.safeParse(json);
 
@@ -32,10 +43,11 @@ export const POST = withApiHandler(async (request: NextRequest) => {
   }
 
   // 2. 校验验证码
+  const codeHash = hashToken(result.data.code);
   const validToken = await prisma.verificationToken.findFirst({
     where: {
       email,
-      token: result.data.code,
+      token: codeHash,
       expiresAt: { gt: new Date() },
     },
   });
@@ -48,7 +60,7 @@ export const POST = withApiHandler(async (request: NextRequest) => {
   await prisma.verificationToken.delete({ where: { id: validToken.id } });
 
   // 3. 创建用户（安全固定：注册只能创建普通用户，管理员需通过后台提权）
-  const salt = await bcrypt.genSalt(10);
+  const salt = await bcrypt.genSalt(12);
   const hash = await bcrypt.hash(password, salt);
 
   const newUser = await prisma.user.create({

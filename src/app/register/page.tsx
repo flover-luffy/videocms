@@ -1,3 +1,4 @@
+/* eslint-disable @next/next/no-img-element */
 "use client";
 
 import Link from "next/link";
@@ -188,9 +189,9 @@ export default function RegisterPage() {
               id="captcha"
               type="text"
               required
-              maxLength={4}
+              maxLength={6}
               className="form-input flex-1"
-              placeholder="输入图片中的 4 位字符"
+              placeholder="输入图片中的 6 位字符"
               value={formData.captcha}
               onChange={handleChange}
             />
@@ -201,9 +202,10 @@ export default function RegisterPage() {
               onClick={() => void fetchCaptcha()}
             >
               {captchaSvg ? (
-                <span
-                  className="flex h-full w-full items-center justify-center"
-                  dangerouslySetInnerHTML={{ __html: captchaSvg }}
+                <img
+                  src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(captchaSvg)}`}
+                  alt="验证码"
+                  className="h-full w-full object-contain"
                 />
               ) : (
                 <span className="h-5 w-5 animate-spin rounded-full border-2 border-blue-400 border-t-transparent" />

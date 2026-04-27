@@ -1,55 +1,48 @@
-import { NextRequest, NextResponse } from "next/server";
-import { verifyToken } from "@/lib/auth/jwt";
+﻿import { NextRequest, NextResponse } from "next/server";
 import { withApiHandler } from "@/lib/api-handler";
-
-/**
- * 收藏 API
- * GET: 获取用户收藏的剧集列表
- * POST: 切换（Toggle）收藏状态
- */
-
+import { requireUser } from "@/lib/auth/require-auth";
 import { UserService } from "@/services/user.service";
 
-/**
- * 收藏 API
- * GET: 获取用户收藏的剧集列表
- * POST: 切换（Toggle）收藏状态
- */
+function getPagination(request: NextRequest) {
+  const limit = Number.parseInt(
+    request.nextUrl.searchParams.get("limit") || "50",
+    10,
+  );
+  const page = Number.parseInt(
+    request.nextUrl.searchParams.get("page") || "1",
+    10,
+  );
+
+  const safeLimit = Number.isFinite(limit) ? limit : 50;
+  const safePage = Number.isFinite(page) ? page : 1;
+
+  return {
+    limit: safeLimit,
+    offset: Math.max(safePage - 1, 0) * safeLimit,
+  };
+}
 
 export const GET = withApiHandler(async (request: NextRequest) => {
-  const token = request.cookies.get("access_token")?.value;
-  if (!token) return NextResponse.json({ error: "未登录" }, { status: 401 });
-
-  const payload = await verifyToken(token);
-  if (!payload)
-    return NextResponse.json(
-      { error: "由于 Token 验证失败，请重新登录" },
-      { status: 401 },
-    );
-
-  const favorites = await UserService.getFavorites(payload.userId);
+  const user = await requireUser(request);
+  const { limit, offset } = getPagination(request);
+  const favorites = await UserService.getFavorites(user.userId, limit, offset);
 
   return NextResponse.json({ items: favorites });
 });
 
 export const POST = withApiHandler(async (request: NextRequest) => {
-  const token = request.cookies.get("access_token")?.value;
-  if (!token) return NextResponse.json({ error: "未登录" }, { status: 401 });
-
-  const payload = await verifyToken(token);
-  if (!payload)
-    return NextResponse.json(
-      { error: "由于 Token 验证失败，请重新登录" },
-      { status: 401 },
-    );
-
+  const user = await requireUser(request);
   const body = await request.json().catch(() => null);
+
   if (!body?.seriesId) {
     return NextResponse.json({ error: "Missing seriesId" }, { status: 400 });
   }
 
-  const seriesId = parseInt(body.seriesId, 10);
-  const result = await UserService.toggleFavorite(payload.userId, seriesId);
+  const seriesId = Number.parseInt(String(body.seriesId), 10);
+  if (!Number.isFinite(seriesId) || seriesId <= 0) {
+    return NextResponse.json({ error: "Invalid seriesId" }, { status: 400 });
+  }
 
+  const result = await UserService.toggleFavorite(user.userId, seriesId);
   return NextResponse.json(result);
 });

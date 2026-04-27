@@ -1,27 +1,42 @@
-import { NextRequest, NextResponse } from "next/server";
+﻿import { NextRequest, NextResponse } from "next/server";
+import crypto, { createHash } from "crypto";
+import { z } from "zod";
 import { withApiHandler } from "@/lib/api-handler";
 import { prisma } from "@/lib/db";
-import { z } from "zod";
-import crypto from "crypto";
 import { sendEmail } from "@/lib/email";
 import { createRateLimiter, RATE_LIMITS } from "@/lib/rate-limit";
 
 const rateLimiter = createRateLimiter(RATE_LIMITS.auth);
+const MIN_RESPONSE_TIME_MS = 700;
+const GENERIC_RESPONSE = {
+  success: true,
+  message: "If the email is registered, a reset link will be sent shortly.",
+};
 
 const ForgotPasswordSchema = z.object({
-  email: z.string().email("邮箱格式不正确"),
+  email: z.string().email("Invalid email format"),
 });
 
-/**
- * 忘记密码 - 发送重置链接
- * POST /api/auth/forgot-password
- */
+function hashToken(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function ensureMinimumResponseDuration(startedAt: number): Promise<void> {
+  const elapsed = Date.now() - startedAt;
+  if (elapsed < MIN_RESPONSE_TIME_MS) {
+    await sleep(MIN_RESPONSE_TIME_MS - elapsed);
+  }
+}
+
 export const POST = withApiHandler(async (request: NextRequest) => {
-  // 速率限制
-  const rateLimitResponse = rateLimiter(request);
+  const rateLimitResponse = await rateLimiter(request);
   if (rateLimitResponse) return rateLimitResponse;
 
-  const body = await request.json();
+  const body = await request.json().catch(() => null);
   const result = ForgotPasswordSchema.safeParse(body);
 
   if (!result.success) {
@@ -31,86 +46,69 @@ export const POST = withApiHandler(async (request: NextRequest) => {
     );
   }
 
+  const startedAt = Date.now();
   const { email } = result.data;
 
-  // 查找用户
-  const user = await prisma.user.findUnique({
-    where: { email },
-    select: { id: true, email: true },
-  });
-
-  // 安全考虑：无论用户是否存在，都返回成功消息（防止邮箱枚举）
-  if (!user) {
-    return NextResponse.json({
-      success: true,
-      message: "如果该邮箱已注册，您将收到密码重置链接",
-    });
-  }
-
-  // 生成重置令牌（32 字节随机字符串）
-  const resetToken = crypto.randomBytes(32).toString("hex");
-  const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 小时后过期
-
-  // 保存重置令牌到数据库
-  await prisma.passwordResetToken.create({
-    data: {
-      token: resetToken,
-      userId: user.id,
-      expiresAt,
-    },
-  });
-
-  // 构建重置链接
-  const resetUrl = `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/reset-password?token=${resetToken}`;
-
-  // 发送邮件
   try {
-    if (process.env.SMTP_HOST) {
-      await sendEmail({
-        to: email,
-        subject: "密码重置请求 - Rom's Cinema",
-        html: `
-                    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-                        <h2 style="color: #3b82f6;">密码重置请求</h2>
-                        <p>您好，</p>
-                        <p>我们收到了您的密码重置请求。请点击下面的链接重置您的密码：</p>
-                        <p style="margin: 30px 0;">
-                            <a href="${resetUrl}" 
-                               style="background-color: #3b82f6; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">
-                                重置密码
-                            </a>
-                        </p>
-                        <p style="color: #666; font-size: 14px;">
-                            此链接将在 1 小时后失效。如果您没有请求重置密码，请忽略此邮件。
-                        </p>
-                        <p style="color: #666; font-size: 14px;">
-                            如果按钮无法点击，请复制以下链接到浏览器：<br>
-                            <span style="color: #3b82f6;">${resetUrl}</span>
-                        </p>
-                        <hr style="margin: 30px 0; border: none; border-top: 1px solid #eee;">
-                        <p style="color: #999; font-size: 12px;">
-                            此邮件由系统自动发送，请勿回复。
-                        </p>
-                    </div>
-                `,
-      });
-    } else {
-      // 开发环境：输出到控制台
-      console.info("\n==================================");
-      console.info("⚠️ [DEV MODE] SMTP not configured.");
-      console.info(`📧 密码重置链接: ${resetUrl}`);
-      console.info("==================================\n");
+    const user = await prisma.user.findUnique({
+      where: { email },
+      select: { id: true, email: true },
+    });
+
+    if (user) {
+      const resetToken = crypto.randomBytes(32).toString("hex");
+      const tokenHash = hashToken(resetToken);
+      const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
+
+      await prisma.$transaction([
+        prisma.passwordResetToken.updateMany({
+          where: { userId: user.id, used: false },
+          data: { used: true },
+        }),
+        prisma.passwordResetToken.create({
+          data: {
+            token: tokenHash,
+            userId: user.id,
+            expiresAt,
+          },
+        }),
+      ]);
+
+      const resetUrl = `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/reset-password?token=${resetToken}`;
+
+      if (process.env.SMTP_HOST) {
+        await sendEmail({
+          to: email,
+          subject: "Password Reset Request - Rom's Cinema",
+          html: `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+              <h2 style="color: #3b82f6;">Password Reset Request</h2>
+              <p>We received a request to reset your password.</p>
+              <p style="margin: 24px 0;">
+                <a href="${resetUrl}" style="background-color: #3b82f6; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">
+                  Reset Password
+                </a>
+              </p>
+              <p style="color: #666; font-size: 14px;">This link will expire in 1 hour.</p>
+            </div>
+          `,
+        });
+      } else {
+        console.info("[ForgotPassword] SMTP not configured, reset link generated in dev mode", {
+          email,
+          resetUrl,
+        });
+      }
     }
 
-    return NextResponse.json({
-      success: true,
-      message: "如果该邮箱已注册，您将收到密码重置链接",
-    });
+    return NextResponse.json(GENERIC_RESPONSE);
   } catch (error: unknown) {
-    console.error("[ForgotPassword] Error:", error);
+    console.error("[ForgotPassword] Failed:", error);
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "请求处理失败" },
+      { error: "Request processing failed, please try again later" },
       { status: 500 },
     );
+  } finally {
+    await ensureMinimumResponseDuration(startedAt);
   }
 });

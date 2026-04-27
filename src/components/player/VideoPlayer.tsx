@@ -26,6 +26,7 @@ interface VideoInfo {
   id: string;
   title: string;
   url: string;
+  rawUrl?: string;
   subtitles?: Subtitle[];
   poster?: string;
 }
@@ -39,6 +40,14 @@ interface PlaylistItem {
 
 const clamp = (value: number, min: number, max: number) =>
   Math.min(max, Math.max(min, value));
+
+const isFiniteNumber = (value: unknown): value is number =>
+  typeof value === "number" && Number.isFinite(value);
+
+const normalizeNonNegative = (value: unknown, fallback = 0) => {
+  const normalized = isFiniteNumber(value) ? value : fallback;
+  return Math.max(0, normalized);
+};
 
 const VideoPlayer = ({
   seriesId,
@@ -93,6 +102,7 @@ const VideoPlayer = ({
   const controlsTimerRef = useRef<NodeJS.Timeout | null>(null);
   const screenshotTimerRef = useRef<NodeJS.Timeout | null>(null);
   const feedbackTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const seekReleaseTimerRef = useRef<NodeJS.Timeout | null>(null);
   const isPlayingRef = useRef(false);
   const showSettingsRef = useRef(false);
   const lastAudibleVolumeRef = useRef(0.8);
@@ -104,9 +114,10 @@ const VideoPlayer = ({
   const currentEpisode = currentIndex >= 0 ? playlist[currentIndex] : null;
 
   const formatTime = (seconds: number) => {
-    const h = Math.floor(seconds / 3600);
-    const m = Math.floor((seconds % 3600) / 60);
-    const s = Math.floor(seconds % 60);
+    const safeSeconds = normalizeNonNegative(seconds, 0);
+    const h = Math.floor(safeSeconds / 3600);
+    const m = Math.floor((safeSeconds % 3600) / 60);
+    const s = Math.floor(safeSeconds % 60);
     return `${h > 0 ? h + ":" : ""}${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
   };
 
@@ -243,9 +254,13 @@ const VideoPlayer = ({
     const subs = videoInfo.subtitles || [];
     const defaultSub = subs.find((s) => s.url);
 
+    const isM3U8 = (videoInfo.url || "").toLowerCase().includes(".m3u8") || 
+                   (videoInfo.rawUrl || "").toLowerCase().includes(".m3u8");
+
     const art = new Artplayer({
       container: containerRef.current,
       url: videoInfo.url,
+      type: isM3U8 ? "m3u8" : "auto",
       poster: videoInfo.poster || "",
       autoplay: true,
       muted: false,
@@ -284,6 +299,29 @@ const VideoPlayer = ({
         },
       },
     });
+
+    // ── HLS.js textTrack 索引偏移修复 ──
+    // 当 HLS.js 挂载后，会向 video 注入额外的隐藏 textTrack（例如 CEA-608），
+    // 导致原本索引为 0 的字幕轨道被向后挤压。Artplayer 内部硬编码了 `textTracks[0]`，
+    // 从而导致字幕监听和获取全部失效。
+    // 解决方案：重写 art.subtitle.textTrack 的 getter，动态寻找我们注入的正确轨道。
+    const INJECTED_TRACK_LABEL = "vcms-subtitle";
+    if (art.subtitle) {
+      Object.defineProperty(art.subtitle, "textTrack", {
+        get: () => {
+          const tracks = art.video.textTracks;
+          if (!tracks || tracks.length === 0) return undefined;
+          // 优先查找我们手动注入的轨道，再查找 Artplayer 自身创建的轨道
+          return (
+            Array.from(tracks).find(
+              (t) =>
+                t.label === INJECTED_TRACK_LABEL ||
+                t.label === "Artplayer"
+            ) || tracks[0]
+          );
+        },
+      });
+    }
 
     artRef.current = art;
 
@@ -326,7 +364,14 @@ const VideoPlayer = ({
 
     art.on("ready", () => {
       const savedProgress = localStorage.getItem(`vcms-progress-${episodeId}`);
-      if (savedProgress) art.currentTime = parseFloat(savedProgress);
+      if (savedProgress) {
+        const parsedSavedProgress = Number.parseFloat(savedProgress);
+        if (isFiniteNumber(parsedSavedProgress) && parsedSavedProgress >= 0) {
+          art.currentTime = parsedSavedProgress;
+        } else {
+          localStorage.removeItem(`vcms-progress-${episodeId}`);
+        }
+      }
       art.playbackRate = playbackSpeed;
       setVolume(art.volume);
       setIsMuted(art.muted);
@@ -342,17 +387,23 @@ const VideoPlayer = ({
         );
       }
 
-      // 确保字幕可见 (Native Track Injection as fallback for CORS or mobile)
+      // 确保字幕可见（Artplayer 内置字幕渲染 + 原生 track 保底）
       if (defaultSub?.url) {
         if (art.subtitle) {
           art.subtitle.show = true;
+          // 强制添加 CSS class，防止插件延迟或被抑制
+          if (art.template && art.template.$player) {
+            art.template.$player.classList.add("art-subtitle-show");
+          }
         }
-        // 保底机制：注入原生 track 元素，利用浏览器的原生渲染器
+        // 保底机制：注入原生 <track> 元素，利用浏览器的原生字幕渲染器。
+        // 这确保即使 Artplayer 的字幕引擎因 CORS 或移动端兼容性问题失效，
+        // 浏览器仍能通过原生 track 显示字幕。
         const existingTrack = art.video.querySelector("track");
         if (!existingTrack) {
           const track = document.createElement("track");
           track.kind = "captions";
-          track.label = "默认字幕";
+          track.label = INJECTED_TRACK_LABEL;
           track.srclang = "zh";
           track.default = true;
           track.src = defaultSub.url;
@@ -391,12 +442,20 @@ const VideoPlayer = ({
     art.on("video:play", () => setIsPlaying(true));
     art.on("video:pause", () => setIsPlaying(false));
     art.on("video:timeupdate", () => {
-      if (!isSeekingRef.current) {
-        setCurrentTime(art.currentTime);
+      const nextTime = art.currentTime;
+      if (
+        !isSeekingRef.current &&
+        isFiniteNumber(nextTime) &&
+        nextTime >= 0
+      ) {
+        setCurrentTime(nextTime);
       }
     });
     art.on("video:loadedmetadata", () => {
-      setDuration(art.duration);
+      const nextDuration = art.duration;
+      setDuration(
+        isFiniteNumber(nextDuration) && nextDuration > 0 ? nextDuration : 0,
+      );
       syncBufferedProgress();
     });
     art.on("video:progress", syncBufferedProgress);
@@ -416,20 +475,30 @@ const VideoPlayer = ({
 
     // 每 10 秒同步一次播放进度到后端（localStorage 始终保存，API 调用静默失败）
     const syncTimer = setInterval(() => {
-      const ct = Math.floor(art.currentTime);
+      const rawCurrentTime = art.currentTime;
+      if (!isFiniteNumber(rawCurrentTime)) return;
+
+      const ct = Math.floor(rawCurrentTime);
       if (ct <= 10) return;
+
       localStorage.setItem(`vcms-progress-${episodeId}`, String(ct));
-      // 使用 fetch 而非 fetchWithCsrf，静默处理失败（如未登录）
+
+      const rawDuration = art.duration;
+      const safeDuration =
+        isFiniteNumber(rawDuration) && rawDuration > 0
+          ? Math.floor(rawDuration)
+          : 0;
+
       fetchWithCsrf("/api/play/progress", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           episodeId: parseInt(episodeId, 10),
           position: ct,
-          duration: art.duration || 0,
+          duration: safeDuration,
         }),
       }).catch(() => {
-        /* 静默忽略：未登录或网络异常不影响播放 */
+        /* Ignore API failures for anonymous/offline playback. */
       });
     }, 10000);
 
@@ -501,15 +570,73 @@ const VideoPlayer = ({
     setShowControls(true);
     if (controlsTimerRef.current) clearTimeout(controlsTimerRef.current);
     controlsTimerRef.current = setTimeout(() => {
-      if (isPlayingRef.current && !showSettingsRef.current) {
+      if (
+        isPlayingRef.current &&
+        !showSettingsRef.current &&
+        !isSeekingRef.current
+      ) {
         setShowControls(false);
       }
     }, 2600);
   }, []);
 
+  const clearSeekReleaseTimer = useCallback(() => {
+    if (seekReleaseTimerRef.current) {
+      clearTimeout(seekReleaseTimerRef.current);
+      seekReleaseTimerRef.current = null;
+    }
+  }, []);
+
+  const startSeeking = useCallback(() => {
+    isSeekingRef.current = true;
+    clearSeekReleaseTimer();
+    // Fallback to avoid a stuck seeking state when pointerup/pointercancel is missed.
+    seekReleaseTimerRef.current = setTimeout(() => {
+      isSeekingRef.current = false;
+      seekReleaseTimerRef.current = null;
+    }, 5000);
+  }, [clearSeekReleaseTimer]);
+
+  const stopSeeking = useCallback(
+    (hideControlsAfter = true) => {
+      isSeekingRef.current = false;
+      clearSeekReleaseTimer();
+      if (hideControlsAfter) {
+        scheduleHideControls();
+      }
+    },
+    [clearSeekReleaseTimer, scheduleHideControls],
+  );
+
   const handleUserActivity = () => {
     scheduleHideControls();
   };
+
+  useEffect(() => {
+    const releaseSeeking = () => {
+      if (isSeekingRef.current) {
+        stopSeeking(false);
+      }
+    };
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState !== "visible") {
+        releaseSeeking();
+      }
+    };
+
+    window.addEventListener("pointerup", releaseSeeking, true);
+    window.addEventListener("pointercancel", releaseSeeking, true);
+    window.addEventListener("blur", releaseSeeking);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
+    return () => {
+      window.removeEventListener("pointerup", releaseSeeking, true);
+      window.removeEventListener("pointercancel", releaseSeeking, true);
+      window.removeEventListener("blur", releaseSeeking);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [stopSeeking]);
 
   useEffect(() => {
     if (isPlaying) {
@@ -526,8 +653,9 @@ const VideoPlayer = ({
     return () => {
       if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
       if (screenshotTimerRef.current) clearTimeout(screenshotTimerRef.current);
+      clearSeekReleaseTimer();
     };
-  }, []);
+  }, [clearSeekReleaseTimer]);
 
   const handleTogglePlay = useCallback(() => {
     if (!artRef.current) return;
@@ -537,19 +665,31 @@ const VideoPlayer = ({
   const seekTo = useCallback(
     (nextTime: number) => {
       if (!artRef.current) return;
-      const safeDuration = artRef.current.duration || duration || 0;
+      const playerDuration = artRef.current.duration;
+      const safeDuration =
+        isFiniteNumber(playerDuration) && playerDuration > 0
+          ? playerDuration
+          : normalizeNonNegative(duration, 0);
       if (safeDuration <= 0) return;
-      const clampedTime = clamp(nextTime, 0, safeDuration);
+      const normalizedNextTime = isFiniteNumber(nextTime)
+        ? nextTime
+        : normalizeNonNegative(currentTime, 0);
+      const clampedTime = clamp(normalizedNextTime, 0, safeDuration);
+      if (isSeekingRef.current) {
+        stopSeeking(false);
+      }
       artRef.current.currentTime = clampedTime;
       setCurrentTime(clampedTime);
     },
-    [duration],
+    [currentTime, duration, stopSeeking],
   );
 
   const seekBy = useCallback(
     (deltaSeconds: number) => {
       if (!artRef.current) return;
-      const baseTime = artRef.current.currentTime || currentTime;
+      const baseTime = isFiniteNumber(artRef.current.currentTime)
+        ? artRef.current.currentTime
+        : normalizeNonNegative(currentTime, 0);
       seekTo(baseTime + deltaSeconds);
       showFeedback(
         deltaSeconds > 0
@@ -779,10 +919,12 @@ const VideoPlayer = ({
         tabIndex={0}
         aria-label="视频播放器，可使用键盘快捷键控制播放"
         className={`relative group overflow-hidden bg-black shadow-4xl mb-0 transition-all duration-500 ease-in-out focus:outline-none focus-visible:outline-none ${isFullscreen ? "fixed inset-0 z-[9999] rounded-none" : "aspect-video rounded-none"}`}
-        onMouseMove={handleUserActivity}
-        onTouchStart={handleUserActivity}
-        onTouchMove={handleUserActivity}
-        onClick={handleUserActivity}
+        onMouseMoveCapture={handleUserActivity}
+        onPointerMoveCapture={handleUserActivity}
+        onPointerDownCapture={handleUserActivity}
+        onTouchStartCapture={handleUserActivity}
+        onTouchMoveCapture={handleUserActivity}
+        onClickCapture={handleUserActivity}
         onMouseLeave={() =>
           isPlaying && !showSettings && setShowControls(false)
         }
@@ -1080,30 +1222,62 @@ const VideoPlayer = ({
                   <motion.div
                     className="absolute top-1/2 -translate-y-1/2 left-0 h-3 sm:h-[8px] md:h-[7px] bg-amber-500 rounded-full shadow-[0_0_8px_rgba(217,119,6,0.5)] z-10"
                     style={{
-                      width: `${duration > 0 ? (currentTime / duration) * 100 : 0}%`,
+                      width: `${duration > 0 && isFiniteNumber(currentTime) ? clamp((currentTime / duration) * 100, 0, 100) : 0}%`,
                     }}
                   />
                   <input
                     type="range"
                     min="0"
-                    max={duration || 100}
-                    value={currentTime}
+                    max={duration > 0 && isFiniteNumber(duration) ? duration : 100}
+                    value={isFiniteNumber(currentTime) ? currentTime : 0}
                     step="0.01"
                     aria-label="播放进度"
                     onChange={(e) => {
-                      const val = parseFloat(e.target.value);
-                      setCurrentTime(val);
-                      if (artRef.current) artRef.current.currentTime = val;
+                      const val = Number.parseFloat(e.target.value);
+                      if (!isFiniteNumber(val)) return;
+
+                      const seekLimit =
+                        duration > 0 && isFiniteNumber(duration) ? duration : 0;
+                      const safeValue =
+                        seekLimit > 0 ? clamp(val, 0, seekLimit) : Math.max(0, val);
+
+                      setCurrentTime(safeValue);
+                      if (artRef.current) artRef.current.currentTime = safeValue;
                     }}
-                    onPointerDown={() => {
-                      isSeekingRef.current = true;
+                    onPointerDown={(event) => {
+                      startSeeking();
+                      if (event.currentTarget.setPointerCapture) {
+                        try {
+                          event.currentTarget.setPointerCapture(event.pointerId);
+                        } catch {
+                          // Ignore pointer-capture support quirks on some browsers.
+                        }
+                      }
                     }}
-                    onPointerUp={() => {
-                      isSeekingRef.current = false;
-                      scheduleHideControls();
+                    onPointerUp={(event) => {
+                      if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+                        try {
+                          event.currentTarget.releasePointerCapture(event.pointerId);
+                        } catch {
+                          // Ignore pointer-capture support quirks on some browsers.
+                        }
+                      }
+                      stopSeeking(true);
                     }}
-                    onPointerCancel={() => {
-                      isSeekingRef.current = false;
+                    onPointerCancel={(event) => {
+                      if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+                        try {
+                          event.currentTarget.releasePointerCapture(event.pointerId);
+                        } catch {
+                          // Ignore pointer-capture support quirks on some browsers.
+                        }
+                      }
+                      stopSeeking(false);
+                    }}
+                    onPointerLeave={() => {
+                      if (isSeekingRef.current) {
+                        stopSeeking(false);
+                      }
                     }}
                     className="player-range-hitbox absolute inset-0 opacity-0 cursor-pointer z-20 h-full w-full touch-manipulation"
                   />
@@ -1332,8 +1506,18 @@ const VideoPlayer = ({
                         }}
                         onSyncSeek={(time) => {
                           if (artRef.current) {
-                            artRef.current.currentTime = time;
-                            setCurrentTime(time);
+                            const playerDuration = artRef.current.duration;
+                            const safeDuration =
+                              isFiniteNumber(playerDuration) && playerDuration > 0
+                                ? playerDuration
+                                : normalizeNonNegative(duration, 0);
+                            const normalizedTime = normalizeNonNegative(time, 0);
+                            const safeTime =
+                              safeDuration > 0
+                                ? clamp(normalizedTime, 0, safeDuration)
+                                : normalizedTime;
+                            artRef.current.currentTime = safeTime;
+                            setCurrentTime(safeTime);
                           }
                         }}
                         onSyncEpisode={(epId) => {
@@ -1400,81 +1584,6 @@ const VideoPlayer = ({
         </div>
       )}
 
-      <style jsx global>{`
-        .player-range-hitbox {
-          -webkit-appearance: none;
-          appearance: none;
-          background: transparent !important;
-          outline: none;
-          -webkit-tap-highlight-color: transparent;
-        }
-        .player-range-hitbox::-webkit-slider-runnable-track {
-          -webkit-appearance: none;
-          appearance: none;
-          background: transparent;
-          border: 0;
-        }
-        .player-range-hitbox::-webkit-slider-thumb {
-          -webkit-appearance: none;
-          appearance: none;
-          width: 0;
-          height: 0;
-          border: 0;
-          background: transparent;
-          box-shadow: none;
-        }
-        .player-range-hitbox::-moz-range-track {
-          background: transparent;
-          border: 0;
-        }
-        .player-range-hitbox::-moz-range-thumb {
-          width: 0;
-          height: 0;
-          border: 0;
-          background: transparent;
-          box-shadow: none;
-        }
-        .player-range-hitbox::-moz-focus-outer {
-          border: 0;
-        }
-        .art-video-player .art-controls,
-        .art-video-player .art-progress,
-        .art-video-player .art-control-progress,
-        .art-video-player .art-layer-gradient,
-        .art-video-player .art-settings,
-        .art-video-player .art-notice,
-        .art-video-player .art-mask {
-          display: none !important;
-        }
-        .art-video-player {
-          background: black !important;
-        }
-        .art-subtitle {
-          bottom: 8% !important;
-          font-size: clamp(
-            14px,
-            calc(var(--player-height) * 0.05),
-            36px
-          ) !important;
-          font-weight: 900 !important;
-          text-shadow: 0 2px 10px rgba(0, 0, 0, 0.9) !important;
-          color: #fff !important;
-          padding: 0 20px !important;
-          transition: all 0.3s ease !important;
-        }
-        :fullscreen .art-subtitle,
-        .art-video-player-fullscreen .art-subtitle {
-          bottom: 10% !important;
-          font-size: clamp(
-            20px,
-            calc(var(--player-height) * 0.08),
-            54px
-          ) !important;
-        }
-        :fullscreen {
-          background-color: black !important;
-        }
-      `}</style>
     </div>
   );
 };

@@ -1,4 +1,5 @@
 import { LRUCache } from "lru-cache";
+import { randomInt, timingSafeEqual } from "node:crypto";
 
 declare global {
   var captchaCache: LRUCache<string, string> | undefined;
@@ -38,8 +39,8 @@ interface CaptchaResult {
 export function generateCaptcha(width = 120, height = 40): CaptchaResult {
   const chars = "0123456789";
   let text = "";
-  for (let i = 0; i < 4; i++) {
-    text += chars[Math.floor(Math.random() * chars.length)];
+  for (let i = 0; i < 6; i++) {
+    text += chars[randomInt(chars.length)];
   }
 
   // 生成 SVG
@@ -47,24 +48,25 @@ export function generateCaptcha(width = 120, height = 40): CaptchaResult {
 
   // 背景噪声点
   for (let i = 0; i < 30; i++) {
-    const x = Math.random() * width;
-    const y = Math.random() * height;
+    const x = randomInt(width * 1000) / 1000;
+    const y = randomInt(height * 1000) / 1000;
     svg += `<circle cx="${x}" cy="${y}" r="1" fill="#3b82f6" fill-opacity="0.2" />`;
   }
 
   // 干扰线
   for (let i = 0; i < 3; i++) {
-    svg += `<line x1="${Math.random() * width}" y1="${Math.random() * height}" x2="${Math.random() * width}" y2="${Math.random() * height}" stroke="#3b82f6" stroke-opacity="0.3" stroke-width="1" />`;
+    svg += `<line x1="${randomInt(width * 1000) / 1000}" y1="${randomInt(height * 1000) / 1000}" x2="${randomInt(width * 1000) / 1000}" y2="${randomInt(height * 1000) / 1000}" stroke="#3b82f6" stroke-opacity="0.3" stroke-width="1" />`;
   }
 
   // 绘制文字 (分散排列并有随机倾斜)
   const colors = ["#ffffff", "#60a5fa", "#93c5fd"];
+  const spacing = width / (text.length + 1);
   for (let i = 0; i < text.length; i++) {
-    const x = 15 + i * 25;
-    const y = 25 + (Math.random() * 5 - 2.5);
-    const fontSize = 24 + Math.random() * 4;
-    const rotate = Math.random() * 30 - 15;
-    const color = colors[Math.floor(Math.random() * colors.length)];
+    const x = spacing * (i + 1) - 6;
+    const y = 25 + (randomInt(5000) / 1000 - 2.5);
+    const fontSize = 24 + randomInt(4000) / 1000;
+    const rotate = randomInt(30000) / 1000 - 15;
+    const color = colors[randomInt(colors.length)];
 
     svg += `<text x="${x}" y="${y}" font-family="Arial, sans-serif" font-weight="900" font-size="${fontSize}" fill="${color}" transform="rotate(${rotate}, ${x}, ${y})">${text[i]}</text>`;
   }
@@ -95,5 +97,13 @@ export function validateCaptcha(captchaId: string, userInput: string): boolean {
   if (!answer) return false;
 
   captchaCache.delete(captchaId);
-  return answer === (userInput || "").trim();
+
+  const input = (userInput || "").trim();
+  const answerBuffer = Buffer.from(answer, "utf8");
+  const inputBuffer = Buffer.from(
+    input.padEnd(answer.length, "\0").slice(0, answer.length),
+    "utf8",
+  );
+
+  return input.length === answer.length && timingSafeEqual(answerBuffer, inputBuffer);
 }

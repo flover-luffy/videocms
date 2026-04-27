@@ -1,13 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useState, type FormEvent } from "react";
 import AuthShell from "@/components/layout/AuthShell";
 import { fetchWithCsrf } from "@/lib/fetch-client";
 
 export default function LoginPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [formData, setFormData] = useState({ email: "", password: "" });
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
@@ -31,7 +32,12 @@ export default function LoginPage() {
       const data = await response.json();
 
       if (response.ok) {
-        router.push("/");
+        const callbackUrl = searchParams.get("callbackUrl");
+        const safeCallbackUrl =
+          callbackUrl?.startsWith("/") && !callbackUrl.startsWith("//")
+            ? callbackUrl
+            : "/";
+        router.push(safeCallbackUrl);
       } else {
         setErrorMsg(data.error || "登录失败，请检查邮箱或密码。");
       }

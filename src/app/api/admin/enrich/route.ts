@@ -45,12 +45,12 @@ export const POST = withApiHandler(async (request: NextRequest) => {
 
   let details;
   if (isManualMatch) {
-    console.log(
+    console.info(
       `[Admin Enrich] 手动校正模式: seriesId=${seriesId}, tmdbId=${manualTmdbId}, type=${manualType}`,
     );
     details = await fetchTmdbById(manualTmdbId, manualType);
   } else {
-    console.log(`[Admin Enrich] 自动搜索模式: ${series.title}`);
+    console.info(`[Admin Enrich] 自动搜索模式: ${series.title}`);
     details = await searchTmdbMetadata(series.title);
   }
 

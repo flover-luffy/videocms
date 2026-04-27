@@ -1,192 +1,277 @@
-import { NextResponse } from 'next/server';
-import type { NextRequest } from 'next/server';
-import { jwtVerify } from 'jose';
-import { addSecurityHeaders } from '@/lib/security-headers';
+import { NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
+import { importSPKI, jwtVerify } from "jose";
+import { addSecurityHeaders } from "@/lib/security-headers";
+import { CsrfProtection } from "@/lib/csrf-protection";
+import { getClientIp } from "@/lib/server-utils";
 
-// Middleware 运行在 Edge Runtime，因此需独立定义 SECRET，保持与 jwt.ts 逻辑一致
-if (!process.env.JWT_SECRET) {
-    if (process.env.NODE_ENV === "production") {
-        throw new Error("🚨 [FATAL] 生产环境中未设置 JWT_SECRET!");
-    }
-    console.warn("⚠️ [SECURITY] 生产环境中未设置 JWT_SECRET!");
-}
+const JWT_ALG = "RS256";
+const DEFAULT_ALLOWED_ORIGIN = "http://localhost:3000";
+const MAX_RATE_LIMIT_KEYS = 20_000;
 
-import { CsrfProtection } from '@/lib/csrf-protection';
+const jwtPublicKey = normalizePublicKey(process.env.JWT_PUBLIC_KEY);
+let publicKeyPromise: ReturnType<typeof importSPKI> | null = null;
 
-const SECRET = new TextEncoder().encode(
-    process.env.JWT_SECRET || "fallback-dev-secret-do-not-use-in-production"
-);
-
-// ========== Edge-compatible Rate Limiter ==========
-// Edge Runtime 不支持 lru-cache（依赖 Node.js API），使用 Map 实现轻量级限流
-interface RateRecord { count: number; resetTime: number }
+type RateRecord = { count: number; resetTime: number };
 
 const rateLimitStore = new Map<string, RateRecord>();
-const AUTH_RATE_LIMIT = { maxRequests: 5, windowMs: 15 * 60 * 1000 };  // 登录：15 分钟 5 次
-const API_RATE_LIMIT = { maxRequests: 60, windowMs: 60 * 1000 };       // API 通用：1 分钟 60 次
+const AUTH_RATE_LIMIT = { maxRequests: 5, windowMs: 15 * 60 * 1000 };
+const API_RATE_LIMIT = { maxRequests: 60, windowMs: 60 * 1000 };
 
-/** 每 5 分钟清理过期条目，防止内存无限增长 */
 let lastCleanup = Date.now();
+
+function normalizePublicKey(value: string | undefined): string {
+  const raw = value?.trim();
+  if (!raw) {
+    throw new Error("[FATAL] JWT_PUBLIC_KEY is not configured");
+  }
+  if (/(fallback|replace[_-]?with|placeholder|changeme|dummy|example)/i.test(raw)) {
+    throw new Error("[FATAL] JWT_PUBLIC_KEY uses an insecure placeholder value");
+  }
+
+  const pem = raw.includes("-----BEGIN")
+    ? raw.replace(/\\n/g, "\n")
+    : atob(raw).replace(/\\n/g, "\n");
+
+  if (!pem.includes("-----BEGIN PUBLIC KEY-----")) {
+    throw new Error("[FATAL] JWT_PUBLIC_KEY must be a PEM key or base64 encoded PEM");
+  }
+
+  return pem;
+}
+
+function getJwtPublicKey() {
+  publicKeyPromise ??= importSPKI(jwtPublicKey, JWT_ALG);
+  return publicKeyPromise;
+}
+
+function getConfiguredCorsOrigins(): string[] {
+  const raw =
+    process.env.API_ALLOWED_ORIGINS ||
+    process.env.ALLOWED_ORIGINS ||
+    DEFAULT_ALLOWED_ORIGIN;
+
+  return raw
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+}
+
+function resolveCorsOrigin(request: NextRequest): string {
+  const allowedOrigins = getConfiguredCorsOrigins();
+  const requestOrigin = request.headers.get("origin")?.trim();
+
+  if (!requestOrigin) {
+    return allowedOrigins[0] ?? DEFAULT_ALLOWED_ORIGIN;
+  }
+
+  if (allowedOrigins.includes("*") || allowedOrigins.includes(requestOrigin)) {
+    return requestOrigin;
+  }
+
+  return allowedOrigins[0] ?? DEFAULT_ALLOWED_ORIGIN;
+}
+
+function applyCorsHeaders(
+  response: NextResponse,
+  allowedOrigin: string,
+  includeMaxAge = false,
+): NextResponse {
+  response.headers.set("Access-Control-Allow-Origin", allowedOrigin);
+  response.headers.set(
+    "Access-Control-Allow-Methods",
+    "GET, POST, PUT, DELETE, PATCH, OPTIONS",
+  );
+  response.headers.set(
+    "Access-Control-Allow-Headers",
+    "Content-Type, Authorization, Idempotency-Key",
+  );
+  response.headers.set("Access-Control-Allow-Credentials", "true");
+  response.headers.set("Vary", "Origin");
+
+  if (includeMaxAge) {
+    response.headers.set("Access-Control-Max-Age", "86400");
+  }
+
+  return response;
+}
+
 function cleanupExpiredEntries() {
-    const now = Date.now();
-    if (now - lastCleanup < 5 * 60 * 1000) return;
-    lastCleanup = now;
-    for (const [key, record] of rateLimitStore) {
-        if (now > record.resetTime) rateLimitStore.delete(key);
+  const now = Date.now();
+  if (now - lastCleanup < 5 * 60 * 1000) return;
+
+  lastCleanup = now;
+  for (const [key, record] of rateLimitStore) {
+    if (now > record.resetTime) {
+      rateLimitStore.delete(key);
     }
+  }
 }
 
-/** 检查是否被限流，返回 429 响应或 null（允许通过） */
+function evictRateLimitEntries() {
+  if (rateLimitStore.size < MAX_RATE_LIMIT_KEYS) {
+    return;
+  }
+
+  cleanupExpiredEntries();
+  if (rateLimitStore.size < MAX_RATE_LIMIT_KEYS) {
+    return;
+  }
+
+  const overflow = rateLimitStore.size - MAX_RATE_LIMIT_KEYS + 1;
+  let removed = 0;
+  for (const key of rateLimitStore.keys()) {
+    rateLimitStore.delete(key);
+    removed += 1;
+    if (removed >= overflow) {
+      break;
+    }
+  }
+}
+
 function checkRateLimit(
-    ip: string,
-    prefix: string,
-    config: { maxRequests: number; windowMs: number }
+  ip: string,
+  prefix: string,
+  config: { maxRequests: number; windowMs: number },
 ): NextResponse | null {
-    cleanupExpiredEntries();
-    const key = `${prefix}:${ip}`;
-    const now = Date.now();
-    const record = rateLimitStore.get(key);
+  cleanupExpiredEntries();
 
-    if (!record || now > record.resetTime) {
-        rateLimitStore.set(key, { count: 1, resetTime: now + config.windowMs });
-        return null;
-    }
+  const key = `${prefix}:${ip}`;
+  const now = Date.now();
+  const record = rateLimitStore.get(key);
 
-    record.count++;
-    rateLimitStore.set(key, record);
-
-    if (record.count > config.maxRequests) {
-        return NextResponse.json(
-            { error: "请求过于频繁，请稍后再试" },
-            {
-                status: 429,
-                headers: { "Retry-After": String(Math.ceil((record.resetTime - now) / 1000)) },
-            }
-        );
-    }
+  if (!record || now > record.resetTime) {
+    evictRateLimitEntries();
+    rateLimitStore.set(key, { count: 1, resetTime: now + config.windowMs });
     return null;
+  }
+
+  record.count += 1;
+  rateLimitStore.set(key, record);
+
+  if (record.count > config.maxRequests) {
+    return NextResponse.json(
+      { error: "Too many requests, please try again later" },
+      {
+        status: 429,
+        headers: {
+          "Retry-After": String(Math.ceil((record.resetTime - now) / 1000)),
+        },
+      },
+    );
+  }
+
+  return null;
 }
 
-/** 从请求头提取客户端 IP */
-function getClientIp(request: NextRequest): string {
-    return (
-        request.headers.get("x-forwarded-for")?.split(",")[0].trim() ||
-        request.headers.get("x-real-ip") ||
-        "unknown"
+function extractBearerToken(request: NextRequest): string | null {
+  const authorization = request.headers.get("Authorization");
+  if (!authorization) return null;
+
+  const match = /^Bearer\s+([A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)$/i.exec(
+    authorization.trim(),
+  );
+  return match?.[1] ?? null;
+}
+
+function handleUnauthorized(request: NextRequest, allowedOrigin: string) {
+  const { pathname } = request.nextUrl;
+
+  if (pathname.startsWith("/api/")) {
+    const response = NextResponse.json(
+      { error: "Unauthorized or insufficient permissions" },
+      { status: 401 },
     );
+    return applyCorsHeaders(response, allowedOrigin);
+  }
+
+  const url = request.nextUrl.clone();
+  url.pathname = "/login";
+  url.searchParams.set("callbackUrl", pathname);
+  return NextResponse.redirect(url);
 }
 
 export async function proxy(request: NextRequest) {
-    const { pathname } = request.nextUrl;
+  const { pathname } = request.nextUrl;
+  const allowedOrigin = resolveCorsOrigin(request);
 
-    // 0. 处理 CORS 预检请求
-    if (request.method === "OPTIONS") {
-        return new NextResponse(null, {
-            status: 204,
-            headers: {
-                "Access-Control-Allow-Origin": process.env.API_ALLOWED_ORIGINS || "http://localhost:3000",
-                "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, PATCH, OPTIONS",
-                "Access-Control-Allow-Headers": "Content-Type, Authorization, Idempotency-Key",
-                "Access-Control-Max-Age": "86400",
-                "Access-Control-Allow-Credentials": "true",
-            },
-        });
+  if (request.method === "OPTIONS") {
+    const response = new NextResponse(null, { status: 204 });
+    return applyCorsHeaders(response, allowedOrigin, true);
+  }
+
+  const csrfError = CsrfProtection.middleware(request);
+  if (csrfError) return csrfError;
+
+  if (pathname.startsWith("/api/")) {
+    const clientIp = getClientIp(request);
+
+    if (pathname === "/api/auth/login" && request.method === "POST") {
+      const authRateLimitResponse = checkRateLimit(
+        clientIp,
+        "auth",
+        AUTH_RATE_LIMIT,
+      );
+      if (authRateLimitResponse) {
+        return applyCorsHeaders(authRateLimitResponse, allowedOrigin);
+      }
     }
 
-    // 1. CSRF 防护校验（针对 POST/PUT/DELETE/PATCH）
-    const csrfError = CsrfProtection.middleware(request);
-    if (csrfError) return csrfError;
+    const apiRateLimitResponse = checkRateLimit(clientIp, "api", API_RATE_LIMIT);
+    if (apiRateLimitResponse) {
+      return applyCorsHeaders(apiRateLimitResponse, allowedOrigin);
+    }
+  }
 
-    // 2. 速率限制
-    if (pathname.startsWith('/api/')) {
-        const clientIp = getClientIp(request);
+  const isAdminPath =
+    pathname.startsWith("/admin") || pathname.startsWith("/api/admin");
+  const isUserPath =
+    pathname.startsWith("/profile") ||
+    pathname.startsWith("/history") ||
+    pathname.startsWith("/favorites") ||
+    pathname.startsWith("/api/user");
 
-        // 登录端点特殊限流（防暴力破解）
-        if (pathname === '/api/auth/login' && request.method === 'POST') {
-            const rateLimitResponse = checkRateLimit(clientIp, 'auth', AUTH_RATE_LIMIT);
-            if (rateLimitResponse) return rateLimitResponse;
-        }
+  if (isAdminPath || isUserPath) {
+    const token =
+      request.cookies.get("access_token")?.value || extractBearerToken(request);
 
-        // API 全局通用限流
-        const rateLimitResponse = checkRateLimit(clientIp, 'api', API_RATE_LIMIT);
-        if (rateLimitResponse) return rateLimitResponse;
+    if (!token) {
+      return handleUnauthorized(request, allowedOrigin);
     }
 
-    // 拦截访问受保护的路径（管理员路径或用户私有路径）
-    const isAdminPath = pathname.startsWith('/admin') || pathname.startsWith('/api/admin');
-    const isUserPath = pathname.startsWith('/profile') || 
-                       pathname.startsWith('/history') || 
-                       pathname.startsWith('/favorites') ||
-                       pathname.startsWith('/api/user');
+    try {
+      const { payload } = await jwtVerify(token, await getJwtPublicKey(), {
+        algorithms: [JWT_ALG],
+      });
 
-    if (isAdminPath || isUserPath) {
-        const token = request.cookies.get('access_token')?.value || request.headers.get("Authorization")?.split(" ")[1];
-
-        if (!token) {
-            return handleUnauthorized(request);
-        }
-
-        try {
-            const { payload } = await jwtVerify(token, SECRET);
-
-            // 如果访问管理员路径，校验是否为管理员
-            if (isAdminPath && payload.role !== 'admin') {
-                return handleUnauthorized(request);
-            }
-        } catch {
-            // Token 验证失败（过期、篡改等）
-            return handleUnauthorized(request);
-        }
+      if (isAdminPath && payload.role !== "admin") {
+        return handleUnauthorized(request, allowedOrigin);
+      }
+    } catch {
+      return handleUnauthorized(request, allowedOrigin);
     }
+  }
 
-    // ======= 3. Nonce CSP 安全机制注入 =======
-    const nonce = btoa(crypto.randomUUID());
-    const requestHeaders = new Headers(request.headers);
-    requestHeaders.set('x-nonce', nonce); // 供 Next.js 服务端组件与 <script> 标签抓取
+  const nonce = btoa(crypto.randomUUID());
+  const requestHeaders = new Headers(request.headers);
+  requestHeaders.set("x-nonce", nonce);
 
-    const response = NextResponse.next({
-        request: {
-            headers: requestHeaders,
-        },
-    });
+  const response = NextResponse.next({
+    request: {
+      headers: requestHeaders,
+    },
+  });
 
-    // 2. 自动补充 CSRF Cookie（如果缺失）
-    if (!request.cookies.has("__csrf_token")) {
-        CsrfProtection.setCsrfCookie(response);
-    }
+  if (!request.cookies.has("__csrf_token")) {
+    CsrfProtection.setCsrfCookie(response);
+  }
 
-    // 3. 添加 CORS 头
-    response.headers.set("Access-Control-Allow-Origin", process.env.API_ALLOWED_ORIGINS || "http://localhost:3000");
-    response.headers.set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, PATCH, OPTIONS");
-    response.headers.set("Access-Control-Allow-Headers", "Content-Type, Authorization, Idempotency-Key");
-    response.headers.set("Access-Control-Allow-Credentials", "true");
-
-    return addSecurityHeaders(response, nonce, pathname);
+  applyCorsHeaders(response, allowedOrigin);
+  return addSecurityHeaders(response, nonce, pathname);
 }
 
-/** 统一处理未授权访问 */
-function handleUnauthorized(request: NextRequest) {
-    const { pathname } = request.nextUrl;
-    if (pathname.startsWith('/api/')) {
-        return NextResponse.json({ error: 'Unauthorized or insufficient permissions' }, { status: 401 });
-    } else {
-        const url = request.nextUrl.clone();
-        url.pathname = '/login';
-        url.searchParams.set('callbackUrl', pathname); // 可选保存原目标路径
-        return NextResponse.redirect(url);
-    }
-}
-
-// 匹配所有请求路径，排除静态资源和 API 限流以外的特殊路径
 export const config = {
-    matcher: [
-        /*
-         * 匹配所有路径，除了：
-         * - _next/static (静态文件)
-         * - _next/image (图片优化文件)
-         * - favicon.ico (图标)
-         * - 各类静态资源和媒体文件
-         */
-        '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|woff|woff2|css|js|mp4|webm|mkv)$).*)',
-    ],
+  matcher: [
+    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|woff|woff2|css|js|mp4|webm|mkv)$).*)",
+  ],
 };

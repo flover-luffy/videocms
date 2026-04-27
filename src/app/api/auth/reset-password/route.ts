@@ -5,6 +5,8 @@ import { z } from "zod";
 import bcrypt from "bcryptjs";
 import { invalidateAllUserTokens } from "@/lib/auth/token-blacklist";
 import { createRateLimiter, RATE_LIMITS } from "@/lib/rate-limit";
+import { createHash } from "node:crypto";
+import { AppError } from "@/lib/errors";
 
 const rateLimiter = createRateLimiter(RATE_LIMITS.auth);
 
@@ -18,13 +20,17 @@ const ResetPasswordSchema = z.object({
     .regex(/[!@#$%^&*]/, "密码必须包含至少一个特殊字符 (!@#$%^&*)"),
 });
 
+function hashToken(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
+}
+
 /**
  * 重置密码
  * POST /api/auth/reset-password
  */
 export const POST = withApiHandler(async (request: NextRequest) => {
   // 速率限制
-  const rateLimitResponse = rateLimiter(request);
+  const rateLimitResponse = await rateLimiter(request);
   if (rateLimitResponse) return rateLimitResponse;
 
   const body = await request.json().catch(() => null);
@@ -38,48 +44,44 @@ export const POST = withApiHandler(async (request: NextRequest) => {
   }
 
   const { token, password } = result.data;
-
-  // 查找重置令牌
-  const resetToken = await prisma.passwordResetToken.findUnique({
-    where: { token },
-    include: { user: true },
-  });
-
-  // 验证令牌
-  if (!resetToken) {
-    return NextResponse.json({ error: "无效的重置链接" }, { status: 400 });
-  }
-
-  if (resetToken.used) {
-    return NextResponse.json({ error: "此重置链接已被使用" }, { status: 400 });
-  }
-
-  if (new Date() > resetToken.expiresAt) {
-    return NextResponse.json(
-      { error: "重置链接已过期，请重新申请" },
-      { status: 400 },
-    );
-  }
+  const tokenHash = hashToken(token);
 
   // 哈希新密码
-  const passwordHash = await bcrypt.hash(password, 10);
+  const passwordHash = await bcrypt.hash(password, 12);
 
-  // 更新密码并标记令牌为已使用
-  await prisma.$transaction([
-    // 更新密码
-    prisma.user.update({
+  const userId = await prisma.$transaction(async (tx) => {
+    const updated = await tx.passwordResetToken.updateMany({
+      where: {
+        token: tokenHash,
+        used: false,
+        expiresAt: { gt: new Date() },
+      },
+      data: { used: true },
+    });
+
+    if (updated.count === 0) {
+      throw AppError.badRequest("无效或已使用的重置链接");
+    }
+
+    const resetToken = await tx.passwordResetToken.findFirst({
+      where: { token: tokenHash },
+      select: { userId: true },
+    });
+
+    if (!resetToken) {
+      throw AppError.badRequest("无效或已使用的重置链接");
+    }
+
+    await tx.user.update({
       where: { id: resetToken.userId },
       data: { passwordHash },
-    }),
-    // 标记令牌为已使用
-    prisma.passwordResetToken.update({
-      where: { id: resetToken.id },
-      data: { used: true },
-    }),
-  ]);
+    });
+
+    return resetToken.userId;
+  });
 
   // 使该用户的所有旧 token 失效（强制重新登录）
-  await invalidateAllUserTokens(resetToken.userId);
+  await invalidateAllUserTokens(userId);
 
   return NextResponse.json({
     success: true,

@@ -11,74 +11,68 @@ config({ path: path.resolve(process.cwd(), ".env") });
 
 // 核心环境变量列表
 const REQUIRED_ENVS = [
-  "JWT_SECRET",
+  "JWT_PRIVATE_KEY",
+  "JWT_PUBLIC_KEY",
   "ENCRYPTION_SECRET",
+  "ENCRYPTION_SALT",
   "DATABASE_URL",
 ] as const;
 
-// ==== 强制安全防线（生产环境防呆设计） ====
-// 构建期标识判定：命令行含有 build、存在 NEXT_PHASE、或 CI 标识
-const commandArgs = process.argv.join(" ");
-const isBuild =
-  process.env.npm_lifecycle_event === "build" ||
-  commandArgs.includes("build") ||
-  process.env.NEXT_PHASE === "phase-production-build" ||
-  process.env.NEXT_PHASE === "phase-export" ||
-  process.env.CI === "true" ||
-  process.env.NODE_ENV !== "production"; // 非纯后端运行时的豁免
+function requireEnv(key: (typeof REQUIRED_ENVS)[number]): string {
+  const value = process.env[key]?.trim();
 
-// 生产环境禁用的保留弱密钥（若检测到它们，直接 Crash 服务防止漏洞）
-const VULNERABLE_SECRETS = [
-  "fallback-dev-secret-do-not-use-in-production",
-  "fallback-secret",
-];
+  if (!value) {
+    throw new Error(`🚨 [FATAL] 缺少关键配置项: ${key}`);
+  }
 
-if (process.env.NODE_ENV === "production" && !isBuild) {
-  for (const key of REQUIRED_ENVS) {
-    if (!process.env[key]) {
-      throw new Error(`🚨 [FATAL] 生产环境缺少关键配置项: ${key}`);
-    }
+  if (isUnsafeConfigValue(value)) {
+    throw new Error(`🚨 [FATAL] ${key} 使用了弱值或占位值，请重新生成。`);
   }
-  // 防止以默认弱密钥静默上线
-  if (VULNERABLE_SECRETS.includes(process.env.JWT_SECRET || "")) {
-    throw new Error(
-      `🚨 [FATAL] 生产环境严禁使用默认 JWT_SECRET，必须在 .env 中重新生成!`,
-    );
-  }
-  if (VULNERABLE_SECRETS.includes(process.env.ENCRYPTION_SECRET || "")) {
-    throw new Error(
-      `🚨 [FATAL] 生产环境严禁使用默认 ENCRYPTION_SECRET，必须在 .env 中重新生成!`,
-    );
-  }
-} else if (!isBuild) {
-  // 开发环境友好警告
-  for (const key of REQUIRED_ENVS) {
-    if (!process.env[key]) {
-      console.warn(
-        `⚠️ [SECURITY] 未配置 ${key}，系统将使用开发模式 fallback。若已在 .env 中配置，请重启服务。`,
-      );
-    }
-  }
+
+  return value;
 }
+
+function isUnsafeConfigValue(value: string): boolean {
+  return /(fallback|replace[_-]?with|placeholder|changeme|dummy|example)/i.test(
+    value,
+  );
+}
+
+function normalizePem(value: string, key: string): string {
+  const unescaped = value.includes("-----BEGIN")
+    ? value.replace(/\\n/g, "\n")
+    : Buffer.from(value, "base64").toString("utf8").replace(/\\n/g, "\n");
+
+  if (!unescaped.includes("-----BEGIN ") || !unescaped.includes("-----END ")) {
+    throw new Error(`🚨 [FATAL] ${key} 必须是 PEM 或 PEM 的 base64 编码`);
+  }
+
+  return unescaped;
+}
+
+const JWT_PRIVATE_KEY = normalizePem(requireEnv(REQUIRED_ENVS[0]), REQUIRED_ENVS[0]);
+const JWT_PUBLIC_KEY = normalizePem(requireEnv(REQUIRED_ENVS[1]), REQUIRED_ENVS[1]);
+const ENCRYPTION_SECRET = requireEnv(REQUIRED_ENVS[2]);
+const ENCRYPTION_SALT = requireEnv(REQUIRED_ENVS[3]);
+requireEnv(REQUIRED_ENVS[4]);
 
 // ========== 配置常量 ==========
 
 // JWT 配置
 export const JWT_CONFIG = {
+  ALG: "RS256",
   ACCESS_TOKEN_TTL: process.env.JWT_ACCESS_TTL || "2h",
   REFRESH_TOKEN_TTL: process.env.JWT_REFRESH_TTL || "7d",
   ACCESS_TOKEN_MAX_AGE: 2 * 60 * 60, // 2 小时 (以秒为单位)
   REFRESH_TOKEN_MAX_AGE: 7 * 24 * 60 * 60, // 7 天 (以秒为单位)
-  // 必须与重构前的原始代码 (jwt.ts) 默认值保持一致，否则 fallback 模式下旧 token 会失效
-  SECRET:
-    process.env.JWT_SECRET || "fallback-dev-secret-do-not-use-in-production",
+  PRIVATE_KEY: JWT_PRIVATE_KEY,
+  PUBLIC_KEY: JWT_PUBLIC_KEY,
 } as const;
 
 // 加密配置
 export const ENCRYPTION_CONFIG = {
-  // 必须与重构前的原始代码 (encryption.ts) 默认值保持一致，否则原有加密数据将无法解密
-  SECRET: process.env.ENCRYPTION_SECRET || "fallback-secret",
-  SALT: process.env.ENCRYPTION_SALT || "fallback-salt",
+  SECRET: ENCRYPTION_SECRET,
+  SALT: ENCRYPTION_SALT,
 } as const;
 
 // 速率限制配置

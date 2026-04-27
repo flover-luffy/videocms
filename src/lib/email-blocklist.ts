@@ -18,6 +18,36 @@ const DISPOSABLE_EMAIL_DOMAINS = new Set([
   "getairmail.com",
   "nada.ltd",
   "tempm.com",
+  "0-mail.com",
+  "0815.ru",
+  "20minutemail.com",
+  "anonaddy.com",
+  "burnermail.io",
+  "byom.de",
+  "deadaddress.com",
+  "discard.email",
+  "discardmail.com",
+  "emailondeck.com",
+  "fakeinbox.com",
+  "getnada.com",
+  "grr.la",
+  "harakirimail.com",
+  "inboxkitten.com",
+  "mail.tm",
+  "mailcatch.com",
+  "mailnesia.com",
+  "mailnull.com",
+  "mintemail.com",
+  "mohmal.com",
+  "moakt.com",
+  "mytemp.email",
+  "sharklasers.com",
+  "spam4.me",
+  "spamgourmet.com",
+  "tmail.ws",
+  "tmpmail.org",
+  "trashmail.net",
+  "wegwerfmail.de",
 ]);
 
 /**
@@ -36,7 +66,13 @@ export function isDisposableEmail(email: string): boolean {
   }
 
   // 检查是否包含某些明显的垃圾域名前缀/后缀（可选的启发式规则）
-  if (domain.includes("10minute") || domain.includes("tempmail")) {
+  if (
+    domain.includes("10minute") ||
+    domain.includes("tempmail") ||
+    domain.includes("throwaway") ||
+    domain.includes("trashmail") ||
+    domain.includes("discardmail")
+  ) {
     return true;
   }
 

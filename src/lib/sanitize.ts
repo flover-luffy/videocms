@@ -85,7 +85,7 @@ export class PathValidator {
       }
 
       // ❌ 拒绝 Windows ADS (Alternate Data Streams) 攻击
-      if (part.includes("::") || part.startsWith("$")) {
+      if (part.includes(":") || part.startsWith("$")) {
         throw new Error("Windows ADS attack detected");
       }
 

@@ -1,15 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyToken } from "@/lib/auth/jwt";
 import { withApiHandler } from "@/lib/api-handler";
+import { getRequestAuthToken } from "@/lib/auth/request-token";
 
 /**
  * 获取当前用户信息（使用 access_token）
  * GET /api/auth/me
  */
 export const GET = withApiHandler(async (request: NextRequest) => {
-  const accessToken =
-    request.cookies.get("access_token")?.value ||
-    request.headers.get("Authorization")?.split(" ")[1];
+  const accessToken = getRequestAuthToken(request);
 
   if (!accessToken) {
     return NextResponse.json({ error: "未登录" }, { status: 401 });

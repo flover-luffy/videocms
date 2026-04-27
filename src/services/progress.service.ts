@@ -35,35 +35,35 @@ export class ProgressService {
     const now = new Date();
     const clientTime = clientTimestamp ? new Date(clientTimestamp) : now;
 
-    // 获取现有记录
-    const existing = await prisma.watchProgress.findUnique({
-      where: {
-        userId_episodeId: { userId, episodeId },
-      },
-      select: { position: true, updatedAt: true },
-    });
+    return prisma.$transaction(async (tx) => {
+      const existing = await tx.watchProgress.findUnique({
+        where: {
+          userId_episodeId: { userId, episodeId },
+        },
+        select: { position: true, updatedAt: true },
+      });
 
-    // 如果服务器上的记录更新，则保留较新的位置
-    if (existing && existing.updatedAt > clientTime) {
-      return existing;
-    }
+      if (existing && existing.updatedAt > clientTime) {
+        return existing;
+      }
 
-    return await prisma.watchProgress.upsert({
-      where: {
-        userId_episodeId: { userId, episodeId },
-      },
-      create: {
-        userId,
-        episodeId,
-        position: Math.floor(position),
-        duration: duration ? Math.floor(duration) : null,
-        updatedAt: clientTime,
-      },
-      update: {
-        position: Math.floor(position),
-        duration: duration ? Math.floor(duration) : undefined,
-        updatedAt: clientTime,
-      },
+      return tx.watchProgress.upsert({
+        where: {
+          userId_episodeId: { userId, episodeId },
+        },
+        create: {
+          userId,
+          episodeId,
+          position: Math.floor(position),
+          duration: duration ? Math.floor(duration) : null,
+          updatedAt: clientTime,
+        },
+        update: {
+          position: Math.floor(position),
+          duration: duration ? Math.floor(duration) : undefined,
+          updatedAt: clientTime,
+        },
+      });
     });
   }
 }

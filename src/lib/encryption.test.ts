@@ -32,7 +32,8 @@ describe("Encryption Core Services", () => {
     const ciphertext = encrypt(plaintext);
 
     expect(ciphertext).not.toBe(plaintext);
-    expect(ciphertext.split(":")).toHaveLength(3);
+    expect(ciphertext.split(":")).toHaveLength(6);
+    expect(ciphertext.startsWith("v2:")).toBe(true);
     expect(decrypt(ciphertext)).toBe(plaintext);
   });
 
@@ -48,6 +49,7 @@ describe("Encryption Core Services", () => {
     const ciphertext = encrypt(plaintext);
 
     expect(isEncrypted(ciphertext)).toBe(true);
+    expect(isEncrypted("v2:600000:abcd:1234:5678:90ab")).toBe(true);
     expect(isEncrypted("not-encrypted:bad-format")).toBe(false);
     expect(isEncrypted("just-plaintext")).toBe(false);
     expect(isEncrypted("abcd:1234:5678")).toBe(true);

@@ -1,12 +1,11 @@
 import { NextRequest } from "next/server";
 import { AppError } from "@/lib/errors";
 import { verifyToken } from "@/lib/auth/jwt";
+import { getRequestAuthToken } from "@/lib/auth/request-token";
 import type { JwtPayload } from "@/types";
 
 export async function requireUser(request: NextRequest): Promise<JwtPayload> {
-  const token =
-    request.cookies.get("access_token")?.value ||
-    request.headers.get("Authorization")?.split(" ")[1];
+  const token = getRequestAuthToken(request);
 
   if (!token) {
     throw AppError.unauthorized("Unauthorized");

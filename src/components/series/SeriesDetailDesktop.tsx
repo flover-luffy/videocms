@@ -8,7 +8,32 @@ import SectionHeading from "@/components/layout/SectionHeading";
 import FavoriteButton from "@/components/ui/FavoriteButton";
 import { normalizeJsonArray, parseTmdbMetadata } from "@/lib/utils";
 
-export default function SeriesDetailDesktop({ series }: { series: any }) {
+interface SeriesEpisode {
+  id: number;
+  episodeNum: number;
+  seasonNum: number | null;
+  title?: string | null;
+}
+
+interface SeriesDetailData {
+  id: number;
+  title: string;
+  overview: string | null;
+  backdropUrl: string | null;
+  posterUrl: string | null;
+  voteAverage: number | null;
+  year: number | null;
+  genres: unknown;
+  cast: unknown;
+  tmdbData: unknown;
+  episodes: SeriesEpisode[];
+}
+
+export default function SeriesDetailDesktop({
+  series,
+}: {
+  series: SeriesDetailData;
+}) {
   const genres = normalizeJsonArray(series.genres);
   const cast = normalizeJsonArray(series.cast);
   const tmdbMeta = parseTmdbMetadata(series.tmdbData);

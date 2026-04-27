@@ -7,8 +7,14 @@ import PageLayout from "@/components/layout/PageLayout";
 import SectionHeading from "@/components/layout/SectionHeading";
 import { fetchWithCsrf } from "@/lib/fetch-client";
 
+interface ProfileUser {
+  id: number;
+  email: string;
+  role: string;
+}
+
 export default function ProfilePage() {
-  const [user, setUser] = useState<any>(null);
+  const [user, setUser] = useState<ProfileUser | null>(null);
   const [favoritesCount, setFavoritesCount] = useState(0);
   const [historyCount, setHistoryCount] = useState(0);
   const [loading, setLoading] = useState(true);

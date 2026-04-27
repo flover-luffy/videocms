@@ -16,7 +16,7 @@ from scp import SCPClient
 load_dotenv()
 
 ENV_FILE = ".env"
-REMOTE_DEPLOY_DIR = "/root/videocms-deploy"
+REMOTE_DEPLOY_DIR = os.getenv("DEPLOY_REMOTE_DIR", "videocms-deploy")
 SOURCE_TAR = "videocms_source.tar.gz"
 COMPOSE_PROJECT = "videocms"
 APP_SERVICE = "app"
@@ -27,7 +27,8 @@ HEALTH_POLL_INTERVAL_SECONDS = 5
 REQUIRED_ENV_VARS = (
     "DEPLOY_SERVER_IP",
     "DEPLOY_SERVER_USER",
-    "DEPLOY_SERVER_PASS",
+    "JWT_PRIVATE_KEY",
+    "JWT_PUBLIC_KEY",
     "POSTGRES_USER",
     "POSTGRES_PASSWORD",
     "POSTGRES_DB",
@@ -98,10 +99,27 @@ def validate_environment(env=None, env_file_path=ENV_FILE):
             "Missing required environment variables: " + ", ".join(missing_vars)
         )
 
+    server_user = env["DEPLOY_SERVER_USER"].strip()
+    ssh_key_path = env.get("DEPLOY_SSH_KEY_PATH", "").strip()
+    if ssh_key_path:
+        ssh_key_path = os.path.expanduser(ssh_key_path)
+
+    if server_user == "root":
+        print_step("WARNING: Deploying as root user is generally not recommended.")
+    if ssh_key_path and not os.path.exists(ssh_key_path):
+        print_step(f"WARNING: SSH key file not found: {ssh_key_path}. Will use password auth.")
+
+    allow_unknown_host = (
+        env.get("DEPLOY_ALLOW_UNKNOWN_HOST", "").strip().lower() == "true"
+    )
+
     return {
         "server_ip": env["DEPLOY_SERVER_IP"].strip(),
-        "server_user": env["DEPLOY_SERVER_USER"].strip(),
-        "server_pass": env["DEPLOY_SERVER_PASS"].strip(),
+        "server_user": server_user,
+        "server_pass": env.get("DEPLOY_SERVER_PASS", "").strip() or None,
+        "ssh_key_path": ssh_key_path if ssh_key_path and os.path.exists(ssh_key_path) else None,
+        "ssh_key_passphrase": env.get("DEPLOY_SSH_KEY_PASSPHRASE", "").strip() or None,
+        "allow_unknown_host": allow_unknown_host,
     }
 
 
@@ -270,11 +288,22 @@ def main():
 
         print_step(f"Connecting to {server_ip} via SSH...")
         ssh = paramiko.SSHClient()
-        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        ssh.load_system_host_keys()
+        if config["allow_unknown_host"]:
+            print_step(
+                "WARNING: DEPLOY_ALLOW_UNKNOWN_HOST=true. Unknown SSH host keys will be auto-trusted."
+            )
+            ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        else:
+            ssh.set_missing_host_key_policy(paramiko.RejectPolicy())
         ssh.connect(
             server_ip,
             username=config["server_user"],
             password=config["server_pass"],
+            key_filename=config["ssh_key_path"],
+            passphrase=config["ssh_key_passphrase"],
+            allow_agent=True,
+            look_for_keys=True,
             timeout=30,
             banner_timeout=60,
             auth_timeout=60,

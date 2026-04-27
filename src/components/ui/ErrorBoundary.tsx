@@ -100,7 +100,9 @@ export class ErrorBoundary extends Component<
             maxWidth: "400px",
           }}
         >
-          {this.state.error.message || "发生了未知错误，请尝试刷新页面。"}
+          {process.env.NODE_ENV === "development"
+            ? this.state.error.message
+            : "发生了未知错误，请尝试刷新页面。"}
         </p>
         <button
           onClick={this.handleReset}

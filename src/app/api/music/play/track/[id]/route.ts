@@ -3,6 +3,8 @@ import { prisma } from "@/lib/db";
 import { createOpenListClient } from "@/lib/openlist/client";
 import { withApiHandler } from "@/lib/api-handler";
 import { verifyToken } from "@/lib/auth/jwt";
+import { getRequestAuthToken } from "@/lib/auth/request-token";
+import { decrypt, isEncrypted } from "@/lib/encryption";
 
 export const GET = withApiHandler(
   async (
@@ -10,9 +12,7 @@ export const GET = withApiHandler(
     context: { params: Promise<{ id: string }> },
   ) => {
     // ── 认证层：必须登录才能获取音乐直链 ──
-    const token =
-      request.cookies.get("access_token")?.value ||
-      request.headers.get("Authorization")?.split(" ")[1];
+    const token = getRequestAuthToken(request);
     if (!token) {
       return NextResponse.json({ error: "请先登录后在播放" }, { status: 401 });
     }
@@ -44,7 +44,10 @@ export const GET = withApiHandler(
     }
 
     const config = track.album.openlistConfig;
-    const client = createOpenListClient(config.host, config.token);
+    const decryptedToken = isEncrypted(config.token)
+      ? decrypt(config.token)
+      : config.token;
+    const client = createOpenListClient(config.host, decryptedToken);
 
     const fileInfo = await client.getFile(track.openlistPath);
     const rawUrl = fileInfo.raw_url;

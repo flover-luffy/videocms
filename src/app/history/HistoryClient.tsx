@@ -10,8 +10,28 @@ import PageLayout from "@/components/layout/PageLayout";
 import SectionHeading from "@/components/layout/SectionHeading";
 import StaggeredList from "@/components/layout/StaggeredList";
 
+interface HistoryRecord {
+  id: number;
+  episodeId: number;
+  position: number;
+  duration: number | null;
+  updatedAt: string;
+  episode: {
+    id: number;
+    episodeNum: number;
+    seasonNum: number | null;
+    title: string | null;
+    series: {
+      id: number;
+      title: string;
+      posterUrl: string | null;
+      backdropUrl?: string | null;
+    };
+  };
+}
+
 export default function HistoryPage() {
-  const [history, setHistory] = useState<any[]>([]);
+  const [history, setHistory] = useState<HistoryRecord[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {

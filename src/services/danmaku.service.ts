@@ -53,6 +53,7 @@ const rateLimitCache = cacheManager.getCache<RateLimitRecord>(
 
 /** 每个用户每分钟最多发送的弹幕数量 */
 const MAX_DANMAKU_PER_MINUTE = 10;
+const MAX_DANMAKU_PER_EPISODE_RESPONSE = 5000;
 
 // ── 内容安全 ──────────────────────────────────────
 const HEX_COLOR_REGEX = /^#[0-9A-Fa-f]{6}$/;
@@ -82,6 +83,7 @@ export class DanmakuService {
 
     const rows = await prisma.danmaku.findMany({
       where: { episodeId },
+      take: MAX_DANMAKU_PER_EPISODE_RESPONSE,
       select: {
         id: true,
         text: true,

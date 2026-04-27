@@ -88,7 +88,7 @@ export class CsrfProtection {
     if (!isOriginValid) {
       if (!origin && !referer) {
         // 某些请求可能缺少这些头，继续进行 Token 验证
-        console.debug("[CSRF] 请求缺少 Origin/Referer，进行 Token 验证");
+        console.info("[CSRF] 请求缺少 Origin/Referer，进行 Token 验证");
       } else {
         // 明确的不匹配，直接拒绝
         return NextResponse.json(
@@ -139,17 +139,14 @@ export class CsrfProtection {
     cookieToken: string,
     headerToken: string,
   ): boolean {
-    // 检查长度是否相同（防止长度泄露）
-    if (cookieToken.length !== headerToken.length) {
-      return false;
-    }
-
-    // 使用位运算进行恒定时间比较
+    const maxLength = Math.max(cookieToken.length, headerToken.length);
     let result = 0;
-    for (let i = 0; i < cookieToken.length; i++) {
-      result |= cookieToken.charCodeAt(i) ^ headerToken.charCodeAt(i);
+    for (let i = 0; i < maxLength; i++) {
+      const cookieCode = i < cookieToken.length ? cookieToken.charCodeAt(i) : 0;
+      const headerCode = i < headerToken.length ? headerToken.charCodeAt(i) : 0;
+      result |= cookieCode ^ headerCode;
     }
-    return result === 0;
+    return cookieToken.length === headerToken.length && result === 0;
   }
 
   /**

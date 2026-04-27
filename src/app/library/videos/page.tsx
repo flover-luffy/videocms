@@ -8,7 +8,7 @@ import PageHero from "@/components/layout/PageHero";
 import PageLayout from "@/components/layout/PageLayout";
 import SectionHeading from "@/components/layout/SectionHeading";
 import StaggeredList from "@/components/layout/StaggeredList";
-import MediaCard from "@/components/media-card/MediaCard";
+import MediaCard, { type MediaCardProps } from "@/components/media-card/MediaCard";
 
 type LibraryType = "movie" | "tv";
 
@@ -29,7 +29,7 @@ export default function LibraryPage() {
   const searchParams = useSearchParams();
   const searchType = searchParams.get("type") === "tv" ? "tv" : "movie";
 
-  const [items, setItems] = useState<any[]>([]);
+  const [items, setItems] = useState<MediaCardProps[]>([]);
   const [loading, setLoading] = useState(true);
   const [type, setType] = useState<LibraryType>(searchType);
 

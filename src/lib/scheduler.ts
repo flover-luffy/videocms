@@ -2,6 +2,7 @@ import { prisma } from "./db";
 import { runImportTask } from "./import-task";
 import { cleanupExpiredTokens } from "./auth/token-blacklist";
 import { SCHEDULER_CONFIG } from "@/config";
+import { withDistributedLock } from "@/lib/cache";
 
 declare global {
   var schedulerStarted: boolean | undefined;
@@ -139,6 +140,17 @@ async function performAutoScan() {
     return;
   }
 
+  const locked = await withDistributedLock("import", 20 * 60, async () => {
+    await performAutoScanLocked();
+    return true;
+  });
+
+  if (!locked) {
+    console.info("[Scheduler] 其它实例正在导入，跳过本次自动扫描");
+  }
+}
+
+async function performAutoScanLocked() {
   const scanStartTime = Date.now();
   console.info("[Scheduler] 开始执行定时全量扫描记录更新...");
   setImporting(true);

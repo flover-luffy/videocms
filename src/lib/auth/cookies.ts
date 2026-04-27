@@ -28,16 +28,17 @@ export function setAuthCookies(
     httpOnly: true,
     secure: isSecure,
     sameSite: "lax" as const,
-    path: "/",
   };
 
   res.cookies.set("access_token", opts.accessToken, {
     ...baseOptions,
+    path: "/",
     maxAge: JWT_CONFIG.ACCESS_TOKEN_MAX_AGE,
   });
 
   res.cookies.set("refresh_token", opts.refreshToken, {
     ...baseOptions,
+    path: "/api/auth",
     maxAge: JWT_CONFIG.REFRESH_TOKEN_MAX_AGE,
   });
 }

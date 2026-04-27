@@ -15,6 +15,7 @@ import { cacheManager } from "@/lib/cache";
 
 // 缓存配置
 const LIST_CACHE_TTL = 300; // 5 分钟
+const SCAN_DIRECTORY_CONCURRENCY = 4;
 
 // ───────────────────────────────────────────────────────
 // OpenList 客户端类
@@ -236,10 +237,11 @@ export class OpenListClient {
         }
       }
 
-      // 【并行关键点】：递归处理文件夹
       if (folders.length > 0) {
-        // 如果文件夹数量极多，可以在此处分批或加入信号量，这里假定 10 个以内是安全的
-        await Promise.all(folders.map((folder) => recurse(folder, depth + 1)));
+        for (let i = 0; i < folders.length; i += SCAN_DIRECTORY_CONCURRENCY) {
+          const batch = folders.slice(i, i + SCAN_DIRECTORY_CONCURRENCY);
+          await Promise.all(batch.map((folder) => recurse(folder, depth + 1)));
+        }
       }
     };
 

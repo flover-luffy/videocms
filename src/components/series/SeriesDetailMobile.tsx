@@ -8,18 +8,43 @@ import SectionHeading from "@/components/layout/SectionHeading";
 import FavoriteButton from "@/components/ui/FavoriteButton";
 import { normalizeJsonArray, parseTmdbMetadata } from "@/lib/utils";
 
-export default function SeriesDetailMobile({ series }: { series: any }) {
+interface SeriesEpisode {
+  id: number;
+  episodeNum: number;
+  seasonNum: number | null;
+  title?: string | null;
+}
+
+interface SeriesDetailData {
+  id: number;
+  title: string;
+  overview: string | null;
+  backdropUrl: string | null;
+  posterUrl: string | null;
+  voteAverage: number | null;
+  year: number | null;
+  genres: unknown;
+  tmdbData: unknown;
+  episodes: SeriesEpisode[];
+}
+
+export default function SeriesDetailMobile({
+  series,
+}: {
+  series: SeriesDetailData;
+}) {
   const genres = normalizeJsonArray(series.genres);
   const tmdbMeta = parseTmdbMetadata(series.tmdbData);
   const firstEpisode = series.episodes[0];
+  const heroImageUrl = series.posterUrl || series.backdropUrl;
 
   return (
     <PageLayout immersive className="!px-0" maxWidth="100%">
       {/* Mobile Hero: Portrait Focus */}
       <div className="relative h-[65vh] w-full overflow-hidden">
-        {(series.posterUrl || series.backdropUrl) && (
+        {heroImageUrl && (
           <Image
-            src={series.posterUrl || series.backdropUrl}
+            src={heroImageUrl}
             alt={series.title}
             fill
             priority

@@ -13,6 +13,7 @@ import { createOpenListClient } from "@/lib/openlist/client";
 import type { PlayUrlResult } from "@/types";
 import { withApiHandler } from "@/lib/api-handler";
 import { verifyToken } from "@/lib/auth/jwt";
+import { getRequestAuthToken } from "@/lib/auth/request-token";
 import { getClientIp } from "@/lib/server-utils";
 import { withRetry } from "@/lib/retry-utils";
 
@@ -22,9 +23,7 @@ export const GET = withApiHandler(
     { params }: { params: Promise<{ id: string }> },
   ) => {
     // ── 认证层：必须登录才能获取播放直链 ──
-    const token =
-      request.cookies.get("access_token")?.value ||
-      request.headers.get("Authorization")?.split(" ")[1];
+    const token = getRequestAuthToken(request);
     if (!token) {
       return NextResponse.json({ error: "请先登录后再播放" }, { status: 401 });
     }

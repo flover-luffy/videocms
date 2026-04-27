@@ -6,7 +6,7 @@ import { tmdbMetadataCache } from "@/lib/cache";
 vi.mock("p-queue", () => {
   return {
     default: class PQueue {
-      add(fn: any) {
+      add<T>(fn: () => T | Promise<T>): T | Promise<T> {
         return fn();
       }
     },

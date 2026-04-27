@@ -2,7 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { verifyToken, signAccessToken, signRefreshToken } from "@/lib/auth/jwt";
 import { withApiHandler } from "@/lib/api-handler";
 import { setAuthCookies } from "@/lib/auth/cookies";
-import { addToBlacklist, isBlacklisted } from "@/lib/auth/token-blacklist";
+import {
+  addToBlacklist,
+  invalidateAllUserTokens,
+  isBlacklisted,
+} from "@/lib/auth/token-blacklist";
 
 /**
  * 令牌刷新端点
@@ -17,7 +21,7 @@ export const POST = withApiHandler(async (request: NextRequest) => {
   }
 
   // 验证刷新令牌
-  const payload = await verifyToken(refreshToken);
+  const payload = await verifyToken(refreshToken, { checkRevocation: false });
   if (!payload || !payload.jti || !payload.exp) {
     return NextResponse.json(
       { error: "刷新令牌已过期或无效" },
@@ -30,6 +34,7 @@ export const POST = withApiHandler(async (request: NextRequest) => {
 
   if (isRevoked) {
     // 检测到可疑的盗用行为（用已被注销的 token 继续刷新）
+    await invalidateAllUserTokens(payload.userId);
     return NextResponse.json(
       { error: "刷新令牌异常：检测到多次使用" },
       { status: 403 },

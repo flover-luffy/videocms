@@ -4,7 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { motion } from "framer-motion";
 
-interface MediaCardProps {
+export interface MediaCardProps {
   id: number;
   title: string;
   posterUrl: string | null;

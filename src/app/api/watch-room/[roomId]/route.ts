@@ -10,10 +10,10 @@ type RouteContext = { params: Promise<{ roomId: string }> };
  * 获取房间详情
  */
 export const GET = withApiHandler(async (req: NextRequest, ctx: RouteContext) => {
-  await requireUser(req);
+  const user = await requireUser(req);
   const { roomId } = await ctx.params;
 
-  const room = await WatchRoomService.getRoom(roomId);
+  const room = await WatchRoomService.getRoomForUser(roomId, user.userId);
   return NextResponse.json({ success: true, data: room });
 });
 

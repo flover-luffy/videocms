@@ -1,5 +1,6 @@
 import { LRUCache } from "lru-cache";
 import { prisma } from "@/lib/db";
+import { cacheManager } from "@/lib/cache";
 
 /**
  * Token 黑名单管理 (单体部署优化版)
@@ -25,6 +26,11 @@ if (process.env.NODE_ENV !== "production") {
 }
 
 const shouldUseBlacklistDb = process.env.NODE_ENV !== "test";
+const distributedBlacklistCache = cacheManager.getCache<{ blacklisted: true }>(
+  "token-blacklist",
+  50000,
+  7 * 24 * 60 * 60,
+);
 
 /**
  * 应用启动时初始化：从数据库加载过期的黑名单记录
@@ -88,6 +94,17 @@ export async function addToBlacklist(
 
   // 1. 加入内存缓存
   tokenBlacklist.set(token, true);
+  const ttlSeconds = Math.max(
+    1,
+    Math.floor(
+      ((expiresAtOrReason instanceof Date
+        ? expiresAtOrReason.getTime()
+        : Date.now() + 7 * 24 * 60 * 60 * 1000) -
+        Date.now()) /
+        1000,
+    ),
+  );
+  await distributedBlacklistCache.set(token, { blacklisted: true }, ttlSeconds);
 
   if (!shouldUseBlacklistDb) return;
 
@@ -127,6 +144,12 @@ export async function isBlacklisted(token: string): Promise<boolean> {
     return true;
   }
 
+  const cached = await distributedBlacklistCache.get(token);
+  if (cached?.blacklisted) {
+    tokenBlacklist.set(token, true);
+    return true;
+  }
+
   if (!shouldUseBlacklistDb) {
     return false;
   }
@@ -141,11 +164,17 @@ export async function isBlacklisted(token: string): Promise<boolean> {
     if (record) {
       // 同步到内存缓存（后续查询会直接命中内存）
       tokenBlacklist.set(token, true);
+      const ttlSeconds = Math.max(
+        1,
+        Math.floor((record.expiresAt.getTime() - Date.now()) / 1000),
+      );
+      await distributedBlacklistCache.set(token, { blacklisted: true }, ttlSeconds);
       return true;
     }
   } catch (error) {
     console.error("[Token Blacklist] 数据库查询失败:", error);
-    // 数据库故障时宁可放通也不要拒绝（优先可用性）
+    // 认证撤销状态无法确认时失败关闭，避免已撤销 token 被放行。
+    return true;
   }
 
   return false;
@@ -229,7 +258,7 @@ export async function isTokenInvalidatedForUser(
     return tokenIssuedAt < invalidatedTimestamp;
   } catch (error) {
     console.error("[Token Blacklist] 检查用户 token 失效状态失败:", error);
-    // 检查失败时宁可放通也不要拒绝（优先可用性）
-    return false;
+    // 认证撤销状态无法确认时失败关闭。
+    return true;
   }
 }

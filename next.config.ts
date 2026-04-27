@@ -1,5 +1,16 @@
 import type { NextConfig } from "next";
 
+const allowedOrigins = (
+  process.env.API_ALLOWED_ORIGINS ||
+  process.env.ALLOWED_ORIGINS ||
+  "http://localhost:3000"
+)
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
+const primaryAllowedOrigin = allowedOrigins[0] || "http://localhost:3000";
+
 const nextConfig: NextConfig = {
   // 生产环境绝对禁止忽略类型报错
   typescript: { ignoreBuildErrors: false },
@@ -16,7 +27,7 @@ const nextConfig: NextConfig = {
   },
   experimental: {
     serverActions: {
-      allowedOrigins: process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : ["localhost:3000"],
+      allowedOrigins,
     },
   },
   async headers() {
@@ -38,7 +49,7 @@ const nextConfig: NextConfig = {
           // CORS 头
           {
             key: "Access-Control-Allow-Origin",
-            value: process.env.API_ALLOWED_ORIGINS || "http://localhost:3000",
+            value: primaryAllowedOrigin,
           },
           { key: "Access-Control-Allow-Methods", value: "GET, POST, PUT, DELETE, PATCH, OPTIONS" },
           { key: "Access-Control-Allow-Headers", value: "Content-Type, Authorization, Idempotency-Key" },

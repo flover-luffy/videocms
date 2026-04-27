@@ -22,6 +22,13 @@ enum MediaType {
   variety
 }
 
+enum WatchRoomStatus {
+  waiting
+  playing
+  paused
+  closed
+}
+
 // ── OpenList 连接配置 ──────────────────────────────
 model OpenlistConfig {
   id        Int       @id @default(autoincrement())
@@ -262,7 +269,7 @@ model Danmaku {
 model WatchRoom {
   id          String   @id @default(cuid())  // 短ID，方便分享
   name        String   @default("一起看")
-  status      String   @default("waiting")   // waiting | playing | paused | closed
+  status      WatchRoomStatus @default(waiting)
   currentTime Float    @default(0)           // 当前同步播放位置（秒）
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt

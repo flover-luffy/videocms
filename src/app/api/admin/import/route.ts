@@ -13,6 +13,7 @@ import { ImportSchema } from "@/lib/validation";
 import { API_TIMEOUT_CONFIG } from "@/config";
 import { requireAdmin } from "@/lib/auth/require-auth";
 import { enforceIdempotency } from "@/lib/idempotency";
+import { withDistributedLock } from "@/lib/cache";
 
 export const POST = withApiHandler(
   async (request: NextRequest) => {
@@ -37,13 +38,23 @@ export const POST = withApiHandler(
         );
       }
 
-      setImporting(true);
-      try {
-        const importResult = await runImportTask(configId, path, title);
-        return NextResponse.json(importResult);
-      } finally {
-        setImporting(false);
+      const importResult = await withDistributedLock("import", 20 * 60, async () => {
+        setImporting(true);
+        try {
+          return await runImportTask(configId, path, title);
+        } finally {
+          setImporting(false);
+        }
+      });
+
+      if (!importResult) {
+        return NextResponse.json(
+          { error: "已有导入任务正在执行，请稍后再试" },
+          { status: 429 },
+        );
       }
+
+      return NextResponse.json(importResult);
     });
   },
   { timeout: API_TIMEOUT_CONFIG.IMPORT },

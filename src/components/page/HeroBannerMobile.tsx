@@ -34,7 +34,6 @@ export default function HeroBannerMobile({
   itemIndex,
   paginate,
   setPage,
-  reduceMotion,
   variants,
   swipePower,
   swipeConfidenceThreshold,

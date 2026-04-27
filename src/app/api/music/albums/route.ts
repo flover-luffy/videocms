@@ -4,8 +4,10 @@ import { withApiHandler } from "@/lib/api-handler";
 
 export const GET = withApiHandler(async (request: NextRequest) => {
   const searchParams = request.nextUrl.searchParams;
-  const limit = parseInt(searchParams.get("limit") || "20", 10);
-  const page = parseInt(searchParams.get("page") || "1", 10);
+  const parsedLimit = parseInt(searchParams.get("limit") || "20", 10);
+  const limit = Math.min(Math.max(Number.isFinite(parsedLimit) ? parsedLimit : 20, 1), 100);
+  const parsedPage = parseInt(searchParams.get("page") || "1", 10);
+  const page = Math.max(Number.isFinite(parsedPage) ? parsedPage : 1, 1);
   const skip = (page - 1) * limit;
 
   const [albums, total] = await Promise.all([

@@ -20,5 +20,3 @@ export const WS_MSG = {
   ERROR: "error",
   PONG: "pong",
 } as const;
-
-export type WsMessageType = (typeof WS_MSG)[keyof typeof WS_MSG];

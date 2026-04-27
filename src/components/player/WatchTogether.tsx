@@ -34,6 +34,11 @@ interface ChatMessage {
   timestamp: number;
 }
 
+type WatchRoomMessage = {
+  type: string;
+  payload: Record<string, unknown>;
+};
+
 interface WatchTogetherProps {
   seriesId: string;
   episodeId: string;
@@ -91,6 +96,9 @@ const WatchTogether: React.FC<WatchTogetherProps> = ({
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const syncTimerRef = useRef<NodeJS.Timeout | null>(null);
   const heartbeatRef = useRef<NodeJS.Timeout | null>(null);
+  const handleWsMessageRef = useRef<((msg: WatchRoomMessage) => void) | null>(
+    null,
+  );
 
   const isHost = useMemo(
     () => room?.hostId === currentUserId,
@@ -108,7 +116,7 @@ const WatchTogether: React.FC<WatchTogetherProps> = ({
       // 可通过 NEXT_PUBLIC_WS_URL 环境变量自定义（如 nginx 代理场景）
       const wsBase = process.env.NEXT_PUBLIC_WS_URL
         || `${protocol}//${window.location.hostname}:3010`;
-      const wsUrl = `${wsBase}/ws/watch-room?userId=${currentUserId}&email=${encodeURIComponent(currentEmail)}`;
+      const wsUrl = `${wsBase}/ws/watch-room`;
 
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
@@ -119,10 +127,7 @@ const WatchTogether: React.FC<WatchTogetherProps> = ({
         ws.send(
           JSON.stringify({
             type: WS_MSG.JOIN,
-            payload: {
-              roomId,
-              isHost: room?.hostId === currentUserId,
-            },
+            payload: { roomId },
           }),
         );
 
@@ -139,7 +144,7 @@ const WatchTogether: React.FC<WatchTogetherProps> = ({
       ws.onmessage = (event) => {
         try {
           const msg = JSON.parse(event.data);
-          handleWsMessage(msg);
+          handleWsMessageRef.current?.(msg);
         } catch {
           console.warn("[WatchTogether] 无法解析 WS 消息");
         }
@@ -157,7 +162,7 @@ const WatchTogether: React.FC<WatchTogetherProps> = ({
         setError("WebSocket 连接失败");
       };
     },
-    [currentUserId, currentEmail, room?.hostId],
+    [currentUserId, currentEmail],
   );
 
   const disconnectWs = useCallback(() => {
@@ -193,7 +198,7 @@ const WatchTogether: React.FC<WatchTogetherProps> = ({
 
   // ── WS 消息处理 ──────────────────────────────────
   const handleWsMessage = useCallback(
-    (msg: { type: string; payload: Record<string, unknown> }) => {
+    (msg: WatchRoomMessage) => {
       switch (msg.type) {
         case WS_MSG.ROOM_STATE: {
           const members = msg.payload.members as RoomMember[];
@@ -285,6 +290,10 @@ const WatchTogether: React.FC<WatchTogetherProps> = ({
     },
     [onSyncPlay, onSyncPause, onSyncSeek, onSyncEpisode],
   );
+
+  useEffect(() => {
+    handleWsMessageRef.current = handleWsMessage;
+  }, [handleWsMessage]);
 
   // ── 房主同步操作 ──────────────────────────────────
   const sendSync = useCallback(
