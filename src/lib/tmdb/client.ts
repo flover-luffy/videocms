@@ -212,13 +212,13 @@ export async function searchTmdbMetadata(
           typeof detailResp.vote_average === "number"
             ? Math.round(detailResp.vote_average * 10) / 10
             : 0,
-        year: isNaN(year!) ? null : year,
+        year: year !== null && !isNaN(year) ? year : null,
         genres: (Array.isArray(detailResp.genres) ? detailResp.genres : [])
           .map((g: { name: string }) => GENRE_MAP_EN_ZH[g.name] || g.name)
           .filter(Boolean),
-        cast: cast.length > 0 ? cast : null, // 直接存数组
+        cast: cast.length > 0 ? cast : null,
         director: director || null,
-        tmdbData: detailResp, // 直接存对象
+        tmdbData: detailResp,
       } as TmdbMetadata;
 
       // 缓存结果（1 小时）
@@ -227,7 +227,7 @@ export async function searchTmdbMetadata(
       return result;
     } catch (err) {
       console.error(`[TMDB] 搜索元数据失败: ${title}`, err);
-      // 搜索失败时不缓存，避免第一次临时故障导致永久封陎
+      // 搜索失败时不缓存，避免第一次临时故障导致永久封锁
       return null;
     }
   }) as Promise<TmdbMetadata | null>;
@@ -273,7 +273,7 @@ export async function searchTmdbCandidates(
             posterUrl: r.poster_path
               ? `${TMDB_IMAGE_BASE}${r.poster_path}`
               : null,
-            year: isNaN(year!) ? null : year,
+            year: year !== null && !isNaN(year) ? year : null,
             overview: r.overview ?? "",
             voteAverage: Math.round(r.vote_average * 10) / 10,
           };
@@ -360,7 +360,7 @@ export async function fetchTmdbById(
           typeof detailResp.vote_average === "number"
             ? Math.round(detailResp.vote_average * 10) / 10
             : 0,
-        year: isNaN(year!) ? null : year,
+        year: year !== null && !isNaN(year) ? year : null,
         genres: (Array.isArray(detailResp.genres) ? detailResp.genres : [])
           .map((g: { name: string }) => GENRE_MAP_EN_ZH[g.name] || g.name)
           .filter(Boolean),
@@ -374,3 +374,4 @@ export async function fetchTmdbById(
     }
   }) as Promise<TmdbMetadata | null>;
 }
+

@@ -96,6 +96,9 @@ const WatchTogether: React.FC<WatchTogetherProps> = ({
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const syncTimerRef = useRef<NodeJS.Timeout | null>(null);
   const heartbeatRef = useRef<NodeJS.Timeout | null>(null);
+  const reconnectTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const reconnectAttemptsRef = useRef(0);
+  const roomRef = useRef<RoomInfo | null>(null);
   const handleWsMessageRef = useRef<((msg: WatchRoomMessage) => void) | null>(
     null,
   );
@@ -105,6 +108,10 @@ const WatchTogether: React.FC<WatchTogetherProps> = ({
     [room, currentUserId],
   );
 
+  useEffect(() => {
+    roomRef.current = room;
+  }, [room]);
+
   // ── WebSocket 连接管理 ──────────────────────────
   const connectWs = useCallback(
     (roomId: string) => {
@@ -112,17 +119,18 @@ const WatchTogether: React.FC<WatchTogetherProps> = ({
       if (wsRef.current?.readyState === WebSocket.OPEN) return;
 
       const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-      // WebSocket 服务运行在独立端口（默认 3010）
-      // 可通过 NEXT_PUBLIC_WS_URL 环境变量自定义（如 nginx 代理场景）
-      const wsBase = process.env.NEXT_PUBLIC_WS_URL
-        || `${protocol}//${window.location.hostname}:3010`;
-      const wsUrl = `${wsBase}/ws/watch-room`;
+      const configuredWsUrl = process.env.NEXT_PUBLIC_WS_URL;
+      const wsBase = configuredWsUrl?.trim()
+        ? configuredWsUrl
+        : `${protocol}//${window.location.host}`;
+      const wsUrl = `${wsBase.replace(/\/$/, "")}/ws/watch-room`;
 
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
 
       ws.onopen = () => {
         setWsConnected(true);
+        reconnectAttemptsRef.current = 0;
         // 加入房间
         ws.send(
           JSON.stringify({
@@ -156,6 +164,14 @@ const WatchTogether: React.FC<WatchTogetherProps> = ({
           clearInterval(heartbeatRef.current);
           heartbeatRef.current = null;
         }
+        // 自动重连（指数退避，最多 5 次）
+        if (roomRef.current && reconnectAttemptsRef.current < 5) {
+          const delay = Math.min(1000 * 2 ** reconnectAttemptsRef.current, 16000);
+          reconnectAttemptsRef.current++;
+          reconnectTimerRef.current = setTimeout(() => {
+            connectWs(roomId);
+          }, delay);
+        }
       };
 
       ws.onerror = () => {
@@ -166,6 +182,11 @@ const WatchTogether: React.FC<WatchTogetherProps> = ({
   );
 
   const disconnectWs = useCallback(() => {
+    reconnectAttemptsRef.current = 5; // 阻止自动重连
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
     if (wsRef.current) {
       wsRef.current.close();
       wsRef.current = null;
@@ -195,6 +216,26 @@ const WatchTogether: React.FC<WatchTogetherProps> = ({
       disconnectWs();
     };
   }, [disconnectWs]);
+
+  // 房主切集时自动同步给房间成员
+  const prevEpisodeIdRef = useRef(episodeId);
+  useEffect(() => {
+    if (prevEpisodeIdRef.current !== episodeId) {
+      prevEpisodeIdRef.current = episodeId;
+      if (isHost && wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.send(
+          JSON.stringify({
+            type: WS_MSG.SYNC,
+            payload: {
+              action: "episode_change",
+              episodeId,
+              currentTime: 0,
+            },
+          }),
+        );
+      }
+    }
+  }, [episodeId, isHost]);
 
   // ── WS 消息处理 ──────────────────────────────────
   const handleWsMessage = useCallback(

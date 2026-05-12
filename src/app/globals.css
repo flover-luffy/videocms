@@ -444,10 +444,14 @@
   .art-video-player .art-layer-gradient,
   .art-video-player .art-settings,
   .art-video-player .art-notice,
-  .art-video-player .art-info,
-  .art-video-player .art-contextmenus,
   .art-video-player .art-mask {
     display: none !important;
+  }
+
+  /* 保留 Artplayer 右键菜单和信息面板，提升 z-index 使其显示在自定义叠加层之上 */
+  .art-video-player .art-info,
+  .art-video-player .art-contextmenus {
+    z-index: 200 !important;
   }
   
   .art-video-player {

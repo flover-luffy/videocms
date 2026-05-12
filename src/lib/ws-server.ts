@@ -1,14 +1,17 @@
-﻿/**
- * 涓€璧风湅 WebSocket 鏈嶅姟鍣? *
- * 鎶€鏈柟妗堬細
- * - 鍩轰簬 `ws` 搴撳湪 Next.js 鑷畾涔夋湇鍔″櫒涓寕杞? * - 浣跨敤 URL path `/ws/watch-room` 涓?HTTP 鍏辩敤绔彛
- * - 娑堟伅鍗忚锛欽SON { type, payload }
- * - 鏀寔蹇冭烦妫€娴嬶紝鑷姩娓呯悊鏂繛瀹㈡埛绔? */
+/**
+ * 一起看 WebSocket 服务端
+ * 技术方案：
+ * - 基于 `ws` 库在 Next.js 自定义服务端中挂载
+ * - 使用 URL path `/ws/watch-room` 与 HTTP 共用端口
+ * - 消息协议：JSON { type, payload }
+ * - 支持心跳检测，自动清理断连客户端
+ */
 
 import type { IncomingMessage } from "http";
 import type { WebSocket as WsWebSocket, WebSocketServer } from "ws";
 import { verifyToken } from "@/lib/auth/jwt";
 import { prisma } from "@/lib/db";
+import { WatchRoomService } from "@/services/watch-room.service";
 import { WS_MSG } from "./ws-protocol";
 
 interface WsMessage {
@@ -25,16 +28,16 @@ interface RoomClient {
   lastHeartbeat: number;
 }
 
-// 鈹€鈹€ 鎴块棿绠＄悊 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+// ── 房间管理 ──────────────────────────────────────
 const rooms = new Map<string, Map<number, RoomClient>>();
 
-/** 蹇冭烦瓒呮椂闃堝€硷紙姣锛?*/
+/** 心跳超时阈值（毫秒） */
 const HEARTBEAT_TIMEOUT_MS = 30000;
 
-/** 蹇冭烦妫€娴嬮棿闅旓紙姣锛?*/
+/** 心跳检测间隔（毫秒） */
 const HEARTBEAT_CHECK_INTERVAL_MS = 15000;
 
-/** 鑾峰彇鎴栧垱寤烘埧闂寸殑瀹㈡埛绔泦鍚?*/
+/** 获取或创建房间的客户端集合 */
 function getOrCreateRoom(roomId: string): Map<number, RoomClient> {
   if (!rooms.has(roomId)) {
     rooms.set(roomId, new Map());
@@ -42,7 +45,7 @@ function getOrCreateRoom(roomId: string): Map<number, RoomClient> {
   return rooms.get(roomId)!;
 }
 
-/** 鍚戞埧闂村唴鎵€鏈夋垚鍛樺箍鎾秷鎭紙鍙帓闄ゆ寚瀹氱敤鎴凤級 */
+/** 向房间内所有成员广播消息（可排除指定用户） */
 function broadcastToRoom(
   roomId: string,
   message: WsMessage,
@@ -61,14 +64,14 @@ function broadcastToRoom(
   }
 }
 
-/** 鍚戝崟涓鎴风鍙戦€佹秷鎭?*/
+/** 向单个客户端发送消息 */
 function sendToClient(client: RoomClient, message: WsMessage) {
   if (client.ws.readyState === 1) {
     client.ws.send(JSON.stringify(message));
   }
 }
 
-/** 绉婚櫎瀹㈡埛绔苟閫氱煡鎴块棿 */
+/** 移除客户端并通知房间 */
 function removeClient(client: RoomClient) {
   const room = rooms.get(client.roomId);
   if (room) {
@@ -84,7 +87,7 @@ function removeClient(client: RoomClient) {
   }
 }
 
-// 鈹€鈹€ 娑堟伅澶勭悊 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+// ── 消息处理 ──────────────────────────────────────
 
 async function handleJoin(
   client: RoomClient,
@@ -95,7 +98,7 @@ async function handleJoin(
   if (!roomId) {
     sendToClient(client, {
       type: WS_MSG.ERROR,
-      payload: { message: "缂哄皯 roomId" },
+      payload: { message: "缺少 roomId" },
     });
     return;
   }
@@ -131,7 +134,7 @@ async function handleJoin(
   if (dbRoom.members.length === 0) {
     sendToClient(client, {
       type: WS_MSG.ERROR,
-      payload: { message: "璇峰厛閫氳繃 API 鍔犲叆鎴块棿" },
+      payload: { message: "请先通过 API 加入房间" },
     });
     return;
   }
@@ -142,7 +145,7 @@ async function handleJoin(
   const room = getOrCreateRoom(roomId);
   room.set(client.userId, client);
 
-  // 閫氱煡鎴块棿鍏朵粬鎴愬憳
+  // 通知房间其他成员
   broadcastToRoom(
     roomId,
     {
@@ -152,7 +155,7 @@ async function handleJoin(
     client.userId,
   );
 
-  // 杩斿洖褰撳墠鎴块棿鎴愬憳鍒楄〃
+  // 返回当前房间成员列表
   const memberList = Array.from(room.values()).map((c) => ({
     userId: c.userId,
     email: c.email,
@@ -176,7 +179,7 @@ function handleSync(
   if (!client.roomId) {
     sendToClient(client, {
       type: WS_MSG.ERROR,
-      payload: { message: "璇峰厛鍔犲叆鎴块棿" },
+      payload: { message: "请先加入房间" },
     });
     return;
   }
@@ -189,18 +192,39 @@ function handleSync(
     return;
   }
 
+  const action = String(payload.action || "");
+  const currentTime = Number(payload.currentTime);
+  const episodeId = Number(payload.episodeId);
+  const safeCurrentTime = Number.isFinite(currentTime) && currentTime >= 0 ? currentTime : 0;
+  const safeEpisodeId = Number.isFinite(episodeId) && episodeId > 0 ? episodeId : undefined;
+  const nextStatus = action === "pause" ? "paused" : "playing";
+
+  void WatchRoomService.updatePlayState(
+    client.roomId,
+    client.userId,
+    nextStatus,
+    safeCurrentTime,
+    safeEpisodeId,
+  ).catch((err) => {
+    console.error("[WS] 同步播放状态失败", err);
+    sendToClient(client, {
+      type: WS_MSG.ERROR,
+      payload: { message: "同步播放状态失败" },
+    });
+  });
+
   broadcastToRoom(
     client.roomId,
     {
       type: WS_MSG.PLAY_SYNC,
       payload: {
-        action: payload.action, // "play" | "pause" | "seek" | "episode_change"
-        currentTime: payload.currentTime,
-        episodeId: payload.episodeId,
+        action,
+        currentTime: safeCurrentTime,
+        episodeId: safeEpisodeId,
         timestamp: Date.now(),
       },
     },
-    client.userId, // 涓嶉渶瑕佸彂鍥炵粰鎴夸富鑷繁
+    client.userId, // 不需要发回给房主自己
   );
 }
 
@@ -211,7 +235,7 @@ function handleChat(
   if (!client.roomId) {
     sendToClient(client, {
       type: WS_MSG.ERROR,
-      payload: { message: "璇峰厛鍔犲叆鎴块棿" },
+      payload: { message: "请先加入房间" },
     });
     return;
   }
@@ -237,7 +261,7 @@ async function handleMessage(client: RoomClient, raw: string): Promise<void> {
   } catch {
     sendToClient(client, {
       type: WS_MSG.ERROR,
-      payload: { message: "鏃犳晥鐨?JSON 娑堟伅" },
+      payload: { message: "无效的 JSON 消息" },
     });
     return;
   }
@@ -262,12 +286,12 @@ async function handleMessage(client: RoomClient, raw: string): Promise<void> {
     default:
       sendToClient(client, {
         type: WS_MSG.ERROR,
-        payload: { message: `鏈煡娑堟伅绫诲瀷: ${msg.type}` },
+        payload: { message: `未知消息类型: ${msg.type}` },
       });
   }
 }
 
-// 鈹€鈹€ WebSocket 鏈嶅姟鍣ㄥ垵濮嬪寲 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+// ── WebSocket 服务端初始化 ────────────────────────
 
 function parseCookies(cookieHeader?: string): Record<string, string> {
   if (!cookieHeader) return {};
@@ -289,7 +313,7 @@ function parseCookies(cookieHeader?: string): Record<string, string> {
   }, {});
 }
 
-/** 浠庢彙鎵?Cookie 涓В鏋愬苟楠岃瘉鐪熷疄鐢ㄦ埛韬唤 */
+/** 从握手 Cookie 中解析并验证真实用户身份 */
 async function parseAuthFromRequest(req: IncomingMessage): Promise<{
   userId: number;
   email: string;
@@ -308,10 +332,10 @@ async function parseAuthFromRequest(req: IncomingMessage): Promise<{
 }
 
 /**
- * 鍒濆鍖?WebSocket 鏈嶅姟鍣? * 鍦?Next.js 鑷畾涔夋湇鍔″櫒鍚姩鍚庤皟鐢? *
+ * 初始化 WebSocket 服务端（在 Next.js 自定义服务端启动后调用）
  * @example
  * ```ts
- * // server.ts (鑷畾涔夊惎鍔ㄨ剼鏈?
+ * // server.ts (自定义启动脚本)
  * import { createServer } from 'http';
  * import next from 'next';
  * import { initWatchRoomWS } from './src/lib/ws-server';
@@ -334,7 +358,7 @@ export function initWatchRoomWS(
     WebSocketServerClass = wsModule.WebSocketServer;
   } catch {
     console.warn(
-      "[WS] ws 搴撴湭瀹夎锛屼竴璧风湅 WebSocket 鍔熻兘涓嶅彲鐢ㄣ€傝杩愯 npm install ws",
+      "[WS] ws 库未安装，一起看 WebSocket 功能不可用。请运行 npm install ws",
     );
     return null;
   }
@@ -345,12 +369,12 @@ export function initWatchRoomWS(
     maxPayload: 1024 * 1024,
   });
 
-  console.info("[WS] 鉁?涓€璧风湅 WebSocket 鏈嶅姟鍣ㄥ凡鍚姩锛岃矾寰? /ws/watch-room");
+  console.info("[WS] 一起看 WebSocket 服务端已启动，路径: /ws/watch-room");
 
   wss.on("connection", async (ws: WsWebSocket, req: IncomingMessage) => {
     const auth = await parseAuthFromRequest(req);
     if (!auth) {
-      ws.close(4001, "璁よ瘉澶辫触锛歍oken 鏃犳晥鎴栧凡杩囨湡");
+      ws.close(4001, "认证失败：Token 无效或已过期");
       return;
     }
 
@@ -366,10 +390,10 @@ export function initWatchRoomWS(
     ws.on("message", (data: Buffer | string) => {
       const raw = typeof data === "string" ? data : data.toString("utf-8");
       void handleMessage(client, raw).catch((err) => {
-        console.error("[WS] 娑堟伅澶勭悊澶辫触", err);
+        console.error("[WS] 消息处理失败", err);
         sendToClient(client, {
           type: WS_MSG.ERROR,
-          payload: { message: "娑堟伅澶勭悊澶辫触" },
+          payload: { message: "消息处理失败" },
         });
       });
     });
@@ -381,7 +405,7 @@ export function initWatchRoomWS(
     });
 
     ws.on("error", (err: Error) => {
-      console.error("[WS] 瀹㈡埛绔繛鎺ュ紓甯?", err.message);
+      console.error("[WS] 客户端连接异常", err.message);
       if (client.roomId) {
         removeClient(client);
       }
@@ -394,9 +418,9 @@ export function initWatchRoomWS(
       for (const [userId, client] of room) {
         if (now - client.lastHeartbeat > HEARTBEAT_TIMEOUT_MS) {
           console.info(
-            `[WS] 蹇冭烦瓒呮椂锛屾柇寮€鐢ㄦ埛 ${userId} (鎴块棿 ${roomId})`,
+            `[WS] 心跳超时，断开用户 ${userId} (房间 ${roomId})`,
           );
-          client.ws.close(4002, "蹇冭烦瓒呮椂");
+          client.ws.close(4002, "心跳超时");
           removeClient(client);
         }
       }

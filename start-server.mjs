@@ -44,14 +44,16 @@ async function startServer() {
       res.end(JSON.stringify({ service: "watch-room-ws", status: "running" }));
     });
 
-    // 动态导入 ws-server（standalone 环境下路径可能不同）
+    // 动态导入 ws-server（使用 tsx 加载 TypeScript 源码）
     let initWatchRoomWS;
     try {
+      // 注册 tsx loader 以支持直接导入 .ts 文件
+      await import("tsx/esm/api").then((tsx) => tsx.register()).catch(() => {});
       const wsServerModule = await import("./src/lib/ws-server.ts");
       initWatchRoomWS = wsServerModule.initWatchRoomWS;
     } catch {
-      // standalone 产物中 ts 文件可能已被编译
       try {
+        // fallback: 预编译的 js 产物
         const wsServerModule = await import("./ws-server.js");
         initWatchRoomWS = wsServerModule.initWatchRoomWS;
       } catch (e2) {

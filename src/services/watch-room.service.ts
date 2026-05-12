@@ -1,8 +1,8 @@
-﻿import { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { AppError } from "@/lib/errors";
 
-// 鈹€鈹€ 鎴块棿鐘舵€佸父閲?鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+// ── 房间状态常量 ──────────────────────────────────
 export const ROOM_STATUS = {
   WAITING: "waiting",
   PLAYING: "playing",
@@ -12,7 +12,7 @@ export const ROOM_STATUS = {
 
 type RoomStatus = (typeof ROOM_STATUS)[keyof typeof ROOM_STATUS];
 
-// 鈹€鈹€ 鎴块棿淇℃伅绫诲瀷 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+// ── 房间信息类型 ──────────────────────────────────
 export interface RoomInfo {
   id: string;
   name: string;
@@ -30,7 +30,7 @@ export interface RoomInfo {
   }>;
 }
 
-// 鈹€鈹€ 鎴块棿鍒涘缓鍙傛暟 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+// ── 房间创建参数 ──────────────────────────────────
 export interface CreateRoomInput {
   hostId: number;
   seriesId: number;
@@ -38,22 +38,22 @@ export interface CreateRoomInput {
   name?: string;
 }
 
-/** 鍗曠敤鎴锋渶澶ф椿璺冩埧闂存暟 */
+/** 单用户最大活跃房间数 */
 const MAX_ACTIVE_ROOMS_PER_USER = 3;
 
-/** 鎴块棿鏈€澶ф垚鍛樻暟 */
+/** 房间最大成员数 */
 const MAX_MEMBERS_PER_ROOM = 10;
 
-/** 鎴块棿鑷姩杩囨湡鏃堕棿锛堝皬鏃讹級 */
+/** 房间自动过期时间（小时） */
 const ROOM_EXPIRY_HOURS = 6;
 
-// 鈹€鈹€ 鏈嶅姟瀹炵幇 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+// ── 服务实现 ──────────────────────────────────────
 export class WatchRoomService {
   /**
-   * 鍒涘缓涓€璧风湅鎴块棿
+   * 创建一起看房间
    */
   static async createRoom(input: CreateRoomInput): Promise<RoomInfo> {
-    // 1. 妫€鏌ョ敤鎴锋椿璺冩埧闂存暟闄愬埗
+    // 1. 检查用户活跃房间数限制
     const activeRoomCount = await prisma.watchRoom.count({
       where: {
         hostId: input.hostId,
@@ -63,7 +63,7 @@ export class WatchRoomService {
 
     if (activeRoomCount >= MAX_ACTIVE_ROOMS_PER_USER) {
       throw AppError.badRequest(
-        `At most ${MAX_ACTIVE_ROOMS_PER_USER} active rooms are allowed per user`, 
+        `At most ${MAX_ACTIVE_ROOMS_PER_USER} active rooms are allowed per user`,
       );
     }
 
@@ -75,10 +75,10 @@ export class WatchRoomService {
       throw AppError.notFound("Episode does not belong to the series or does not exist");
     }
 
-    // 3. 鍒涘缓鎴块棿 + 鎴夸富鑷姩鍔犲叆
+    // 3. 创建房间 + 房主自动加入
     const room = await prisma.watchRoom.create({
       data: {
-        name: input.name?.trim().slice(0, 50) || "涓€璧风湅",
+        name: input.name?.trim().slice(0, 50) || "一起看",
         hostId: input.hostId,
         seriesId: input.seriesId,
         episodeId: input.episodeId,
@@ -100,7 +100,7 @@ export class WatchRoomService {
   }
 
   /**
-   * 鍔犲叆鎴块棿
+   * 加入房间
    */
   static async joinRoom(
     roomId: string,
@@ -164,7 +164,7 @@ export class WatchRoomService {
   }
 
   /**
-   * 绂诲紑鎴块棿
+   * 离开房间
    */
   static async leaveRoom(roomId: string, userId: number): Promise<void> {
     const room = await prisma.watchRoom.findUnique({
@@ -176,7 +176,7 @@ export class WatchRoomService {
       throw AppError.notFound("Room not found");
     }
 
-    // 鎴夸富绂诲紑 = 鍏抽棴鎴块棿
+    // 房主离开 = 关闭房间
     if (room.hostId === userId) {
       await prisma.watchRoom.update({
         where: { id: roomId },
@@ -185,14 +185,14 @@ export class WatchRoomService {
       return;
     }
 
-    // 鏅€氭垚鍛樼寮€
+    // 普通成员离开
     await prisma.watchRoomMember.deleteMany({
       where: { roomId, userId },
     });
   }
 
   /**
-   * 鍏抽棴鎴块棿锛堜粎鎴夸富锛?   */
+   * 关闭房间（仅房主） */
   static async closeRoom(roomId: string, userId: number): Promise<void> {
     const room = await prisma.watchRoom.findUnique({
       where: { id: roomId },
@@ -204,7 +204,7 @@ export class WatchRoomService {
     }
 
     if (room.hostId !== userId) {
-      throw AppError.forbidden("鍙湁鎴夸富鍙互鍏抽棴鎴块棿");
+      throw AppError.forbidden("只有房主可以关闭房间");
     }
 
     await prisma.watchRoom.update({
@@ -213,7 +213,7 @@ export class WatchRoomService {
     });
   }
   /**
-   * 鑾峰彇鎴块棿淇℃伅锛堜粎鎴块棿鎴愬憳鍙锛?   */
+   * 获取房间信息（仅房间成员可见） */
   static async getRoomForUser(
     roomId: string,
     userId: number,
@@ -235,14 +235,14 @@ export class WatchRoomService {
 
     const isMember = room.members.some((member) => member.userId === userId);
     if (!isMember) {
-      throw AppError.forbidden("浠呮埧闂存垚鍛樺彲鏌ョ湅鎴块棿淇℃伅");
+      throw AppError.forbidden("仅房间成员可查看房间信息");
     }
 
     return this.formatRoomInfo(room);
   }
 
   /**
-   * 鏇存柊鎴块棿鎾斁鐘舵€侊紙鎴夸富涓撳睘锛?   */
+   * 更新房间播放状态（房主专属） */
   static async updatePlayState(
     roomId: string,
     hostId: number,
@@ -259,22 +259,21 @@ export class WatchRoomService {
       throw AppError.notFound("Room not found");
     }
     if (room.hostId !== hostId) {
-      throw AppError.forbidden("鍙湁鎴夸富鍙互鎺у埗鎾斁");
-    }
-
-    const updateData: Record<string, unknown> = { status, currentTime };
-    if (episodeId !== undefined) {
-      updateData.episodeId = episodeId;
+      throw AppError.forbidden("只有房主可以控制播放");
     }
 
     await prisma.watchRoom.update({
       where: { id: roomId },
-      data: updateData,
+      data: {
+        status,
+        currentTime,
+        ...(episodeId !== undefined && { episodeId }),
+      },
     });
   }
 
   /**
-   * 娓呯悊杩囨湡鎴块棿锛堢敱 scheduler 璋冪敤锛?   */
+   * 清理过期房间（由 scheduler 调用） */
   static async cleanupExpiredRooms(): Promise<number> {
     const expiry = new Date(Date.now() - ROOM_EXPIRY_HOURS * 60 * 60 * 1000);
 
@@ -294,7 +293,7 @@ export class WatchRoomService {
   }
 
   /**
-   * 鏍煎紡鍖栨埧闂翠俊鎭緭鍑?   */
+   * 格式化房间信息输出 */
   private static formatRoomInfo(room: {
     id: string;
     name: string;
@@ -328,4 +327,5 @@ export class WatchRoomService {
     };
   }
 }
+
 

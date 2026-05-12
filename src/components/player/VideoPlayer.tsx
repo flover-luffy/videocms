@@ -289,9 +289,89 @@ const VideoPlayer = ({
       customType: {
         m3u8: function (video: HTMLVideoElement, url: string) {
           if (Hls.isSupported()) {
-            const hls = new Hls();
+            const hls = new Hls({
+              backBufferLength: 90,
+              maxBufferLength: 30,
+              maxMaxBufferLength: 120,
+              fragLoadingTimeOut: 20000,
+              fragLoadingMaxRetry: 6,
+              fragLoadingMaxRetryTimeout: 64000,
+              manifestLoadingTimeOut: 20000,
+              manifestLoadingMaxRetry: 4,
+              levelLoadingMaxRetry: 4,
+              enableWorker: true,
+            });
             hls.loadSource(url);
             hls.attachMedia(video);
+
+            let mediaErrorRecoveryCount = 0;
+
+            hls.on(Hls.Events.ERROR, (_event, data) => {
+              if (!data.fatal) return;
+
+              if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+                console.warn("[HLS] Fatal network error, attempting recovery...");
+                hls.startLoad(Math.max(video.currentTime, 0));
+                return;
+              }
+
+              if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+                mediaErrorRecoveryCount++;
+                if (mediaErrorRecoveryCount <= 1) {
+                  console.warn("[HLS] Fatal media error, attempting recoverMediaError...");
+                  hls.recoverMediaError();
+                } else if (mediaErrorRecoveryCount <= 2) {
+                  console.warn("[HLS] Fatal media error persists, swapping audio codec...");
+                  hls.swapAudioCodec();
+                  hls.recoverMediaError();
+                } else {
+                  console.error("[HLS] Fatal media error unrecoverable after 2 attempts");
+                  hls.destroy();
+                  setError("视频流加载失败，请刷新页面后重试");
+                }
+                return;
+              }
+
+              hls.destroy();
+              setError("视频流加载失败，请刷新页面后重试");
+            });
+
+            hls.on(Hls.Events.FRAG_LOADED, () => {
+              mediaErrorRecoveryCount = 0;
+            });
+
+            let stallTimer: ReturnType<typeof setTimeout> | null = null;
+            const onWaiting = () => {
+              if (stallTimer) clearTimeout(stallTimer);
+              stallTimer = setTimeout(() => {
+                if (video.paused || video.ended) return;
+                const buffered = video.buffered;
+                if (buffered.length > 0) {
+                  const bufferedEnd = buffered.end(buffered.length - 1);
+                  if (bufferedEnd - video.currentTime > 0.5) {
+                    console.warn("[HLS] Stall detected with buffer available, nudging playback...");
+                    video.currentTime = video.currentTime + 0.1;
+                    video.play().catch(() => {});
+                    return;
+                  }
+                }
+                console.warn("[HLS] Stall detected, restarting load...");
+                hls.startLoad(Math.max(video.currentTime, 0));
+                video.play().catch(() => {});
+              }, 5000);
+            };
+            const onPlaying = () => {
+              if (stallTimer) { clearTimeout(stallTimer); stallTimer = null; }
+            };
+            video.addEventListener("waiting", onWaiting);
+            video.addEventListener("playing", onPlaying);
+
+            art.once("destroy", () => {
+              if (stallTimer) clearTimeout(stallTimer);
+              video.removeEventListener("waiting", onWaiting);
+              video.removeEventListener("playing", onPlaying);
+              hls.destroy();
+            });
           } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
             video.src = url;
           }

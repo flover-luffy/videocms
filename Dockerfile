@@ -47,6 +47,15 @@ RUN install -d -o nextjs -g nodejs /app/.next/cache
 
 # 拷贝自定义启动脚本（集成 WebSocket 服务器）
 COPY --from=builder --chown=nextjs:nodejs /app/start-server.mjs ./start-server.mjs
+# 拷贝 WebSocket 服务端源码及其依赖模块（standalone trace 不包含动态导入的文件）
+COPY --from=builder --chown=nextjs:nodejs /app/src/lib/ws-server.ts ./src/lib/ws-server.ts
+COPY --from=builder --chown=nextjs:nodejs /app/src/lib/ws-protocol.ts ./src/lib/ws-protocol.ts
+COPY --from=builder --chown=nextjs:nodejs /app/src/lib/auth/jwt.ts ./src/lib/auth/jwt.ts
+COPY --from=builder --chown=nextjs:nodejs /app/src/lib/db.ts ./src/lib/db.ts
+COPY --from=builder --chown=nextjs:nodejs /app/src/services/watch-room.service.ts ./src/services/watch-room.service.ts
+COPY --from=builder --chown=nextjs:nodejs /app/src/lib/errors.ts ./src/lib/errors.ts
+COPY --from=builder --chown=nextjs:nodejs /app/src/config ./src/config
+COPY --from=builder --chown=nextjs:nodejs /app/tsconfig.json ./tsconfig.json
 
 USER nextjs
 
