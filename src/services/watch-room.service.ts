@@ -1,3 +1,4 @@
+import logger from "@/lib/logger";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { AppError } from "@/lib/errors";
@@ -286,7 +287,7 @@ export class WatchRoomService {
     });
 
     if (result.count > 0) {
-      console.info(`[WatchRoom] Cleaned ${result.count} expired rooms`);
+      logger.info(`[WatchRoom] Cleaned ${result.count} expired rooms`);
     }
 
     return result.count;

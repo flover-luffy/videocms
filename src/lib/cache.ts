@@ -1,3 +1,4 @@
+import logger from "@/lib/logger";
 /**
  * 全局统一缓存服务
  * 支持双轨运行：
@@ -166,7 +167,7 @@ if (!redisClient && shouldUseRedis && process.env.REDIS_URL) {
   });
 
   redisClient.on("connect", () => {
-    console.info("✅ Redis 连接成功");
+    logger.info("✅ Redis 连接成功");
   });
 
   if (process.env.NODE_ENV !== "production") {

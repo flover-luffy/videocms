@@ -1,3 +1,4 @@
+import logger from "@/lib/logger";
 /**
  * 一起看 WebSocket 服务端
  * 技术方案：
@@ -369,7 +370,7 @@ export function initWatchRoomWS(
     maxPayload: 1024 * 1024,
   });
 
-  console.info("[WS] 一起看 WebSocket 服务端已启动，路径: /ws/watch-room");
+  logger.info("[WS] 一起看 WebSocket 服务端已启动，路径: /ws/watch-room");
 
   wss.on("connection", async (ws: WsWebSocket, req: IncomingMessage) => {
     // SECURITY: Validate Origin header to prevent CSWSH attacks
@@ -429,7 +430,7 @@ export function initWatchRoomWS(
     for (const [roomId, room] of rooms) {
       for (const [userId, client] of room) {
         if (now - client.lastHeartbeat > HEARTBEAT_TIMEOUT_MS) {
-          console.info(
+          logger.info(
             `[WS] 心跳超时，断开用户 ${userId} (房间 ${roomId})`,
           );
           client.ws.close(4002, "心跳超时");

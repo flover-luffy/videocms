@@ -1,6 +1,7 @@
 import { LRUCache } from "lru-cache";
 import { prisma } from "@/lib/db";
 import { cacheManager } from "@/lib/cache";
+import logger from "@/lib/logger";
 
 /**
  * Token 黑名单管理 (单体部署优化版)
@@ -40,7 +41,7 @@ export async function initializeTokenBlacklist(): Promise<void> {
   if (!shouldUseBlacklistDb) return;
 
   try {
-    console.info("[Token Blacklist] 初始化：从数据库加载黑名单...");
+    logger.info("[Token Blacklist] 初始化：从数据库加载黑名单...");
 
     const unexpiredList = await prisma.tokenBlacklist.findMany({
       where: {
@@ -56,7 +57,7 @@ export async function initializeTokenBlacklist(): Promise<void> {
       tokenBlacklist.set(record.token, true);
     }
 
-    console.info(
+    logger.info(
       `[Token Blacklist] 初始化完成，加载了 ${unexpiredList.length} 条黑名单记录`,
     );
   } catch (error) {
@@ -196,7 +197,7 @@ export async function cleanupExpiredTokens(): Promise<number> {
       },
     });
 
-    console.info(`[Token Blacklist] 清理了 ${result.count} 条过期黑名单记录`);
+    logger.info(`[Token Blacklist] 清理了 ${result.count} 条过期黑名单记录`);
     return result.count;
   } catch (error) {
     console.error("[Token Blacklist] 清理失败:", error);
@@ -218,7 +219,7 @@ export async function invalidateAllUserTokens(userId: number): Promise<void> {
       },
     });
 
-    console.info(
+    logger.info(
       `[Token Blacklist] 用户 ${userId} 的所有 token 已失效(在 ${user.tokenInvalidatedAt})`,
     );
   } catch (error) {
