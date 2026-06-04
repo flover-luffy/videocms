@@ -233,9 +233,9 @@ class RedisCache<T extends object> implements ICache<T> {
     const ttl = ttlSeconds !== undefined ? ttlSeconds : this.defaultTTLSeconds;
     try {
       await this.client.set(this.getKey(key), JSON.stringify(value), "EX", ttl);
-      // 这里为了实现类似 LRU 的陈旧读取 (Stale fallback)，我们可以同时存一份不设过期时间的 shadow copy，
-      // 但为了性能在这里直接复用基础的 EX 过期。真实的企业级架构可以引入独立的 stale namespace。
-      await this.client.set(`${this.getKey(key)}:stale`, JSON.stringify(value));
+      // Stale副本设置为主键TTL的3倍，防止内存无限增长
+      const staleTTL = ttl * 3;
+      await this.client.set(`${this.getKey(key)}:stale`, JSON.stringify(value), "EX", staleTTL);
     } catch (err) {
       console.error(`[Cache:Redis] set 失败: ${key}`, err);
     }

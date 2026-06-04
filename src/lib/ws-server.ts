@@ -372,6 +372,17 @@ export function initWatchRoomWS(
   console.info("[WS] 一起看 WebSocket 服务端已启动，路径: /ws/watch-room");
 
   wss.on("connection", async (ws: WsWebSocket, req: IncomingMessage) => {
+    // SECURITY: Validate Origin header to prevent CSWSH attacks
+    const origin = req.headers.origin;
+    const allowedOrigins = process.env.ALLOWED_ORIGINS
+      ? process.env.ALLOWED_ORIGINS.split(',')
+      : ['http://localhost:3000', 'http://localhost:3001'];
+
+    if (origin && !allowedOrigins.includes(origin)) {
+      ws.close(1008, "Invalid origin");
+      return;
+    }
+
     const auth = await parseAuthFromRequest(req);
     if (!auth) {
       ws.close(4001, "认证失败：Token 无效或已过期");

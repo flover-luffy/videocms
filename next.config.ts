@@ -33,6 +33,17 @@ const nextConfig: NextConfig = {
   async headers() {
     const headers = [
       {
+        // 全局安全响应头
+        source: "/:path*",
+        headers: [
+          { key: "X-Content-Type-Options", value: "nosniff" },
+          { key: "X-Frame-Options", value: "DENY" },
+          { key: "X-XSS-Protection", value: "1; mode=block" },
+          { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+          { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
+        ],
+      },
+      {
         // 播放页面：启用 Cross-Origin-Isolated，使 SharedArrayBuffer 可用。
         // COEP credentialless（Chrome 96+）比 require-corp 更宽松：
         // 不要求第三方资源（如 AList 视频流）携带 CORP 头。
@@ -52,7 +63,7 @@ const nextConfig: NextConfig = {
             value: primaryAllowedOrigin,
           },
           { key: "Access-Control-Allow-Methods", value: "GET, POST, PUT, DELETE, PATCH, OPTIONS" },
-          { key: "Access-Control-Allow-Headers", value: "Content-Type, Authorization, Idempotency-Key" },
+          { key: "Access-Control-Allow-Headers", value: "Content-Type, Authorization, Idempotency-Key, X-CSRF-Token" },
           { key: "Access-Control-Max-Age", value: "86400" },
           { key: "Access-Control-Allow-Credentials", value: "true" },
         ],

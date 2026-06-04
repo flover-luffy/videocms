@@ -58,7 +58,8 @@ export const POST = withApiHandler(async (request: NextRequest) => {
     if (user) {
       const resetToken = crypto.randomBytes(32).toString("hex");
       const tokenHash = hashToken(resetToken);
-      const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
+      // SECURITY: 密码重置token 15分钟过期，减少攻击窗口
+      const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
 
       await prisma.$transaction([
         prisma.passwordResetToken.updateMany({
@@ -89,7 +90,7 @@ export const POST = withApiHandler(async (request: NextRequest) => {
                   Reset Password
                 </a>
               </p>
-              <p style="color: #666; font-size: 14px;">This link will expire in 1 hour.</p>
+              <p style="color: #666; font-size: 14px;">This link will expire in 15 minutes.</p>
             </div>
           `,
         });

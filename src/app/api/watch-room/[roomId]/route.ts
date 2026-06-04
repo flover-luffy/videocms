@@ -38,6 +38,14 @@ export const POST = withApiHandler(async (req: NextRequest, ctx: RouteContext) =
       return NextResponse.json({ success: true, message: "已离开房间" });
     }
     case "close": {
+      // SECURITY: API层授权检查 - 验证房间所有权
+      const room = await WatchRoomService.getRoomForUser(roomId, user.userId);
+      if (room.hostId !== user.userId) {
+        return NextResponse.json(
+          { error: "只有房主可以关闭房间" },
+          { status: 403 }
+        );
+      }
       await WatchRoomService.closeRoom(roomId, user.userId);
       return NextResponse.json({ success: true, message: "房间已关闭" });
     }
@@ -56,6 +64,15 @@ export const POST = withApiHandler(async (req: NextRequest, ctx: RouteContext) =
 export const DELETE = withApiHandler(async (req: NextRequest, ctx: RouteContext) => {
   const user = await requireUser(req);
   const { roomId } = await ctx.params;
+
+  // SECURITY: API层授权检查 - 验证房间所有权
+  const room = await WatchRoomService.getRoomForUser(roomId, user.userId);
+  if (room.hostId !== user.userId) {
+    return NextResponse.json(
+      { error: "只有房主可以关闭房间" },
+      { status: 403 }
+    );
+  }
 
   await WatchRoomService.closeRoom(roomId, user.userId);
   return NextResponse.json({ success: true, message: "房间已关闭" });

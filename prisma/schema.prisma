@@ -31,92 +31,97 @@ enum WatchRoomStatus {
 
 // ── OpenList 连接配置 ──────────────────────────────
 model OpenlistConfig {
-  id        Int       @id @default(autoincrement())
+  id        Int      @id @default(autoincrement())
   name      String
-  host      String    // e.g. https://your-openlist.com
-  token     String    // 访问 Token（建议加密后存储）
-  createdAt DateTime  @default(now())
+  host      String // e.g. https://your-openlist.com
+  token     String // 访问 Token（建议加密后存储）
+  createdAt DateTime @default(now())
 
-  series    Series[]
-  albums    Album[]
+  series Series[]
+  albums Album[]
 }
 
 // ── 影视剧集 ──────────────────────────────────────
 model Series {
-  id              Int             @id @default(autoincrement())
-  title           String
-  type            MediaType       @default(tv)
-  sourcePath      String          // OpenList 目录路径
-  tmdbId          Int?
-  posterUrl       String?
-  backdropUrl     String?
-  overview        String?
-  voteAverage     Float?
-  year            Int?
-  genres          Json?          // 原 String? 改为 Json?
-  cast            Json?          // 原 String? 改为 Json?
-  director        String?        // 导演/制作人
-  tmdbData        Json?          // 原 String? 改为 Json?
-  isFeatured      Boolean         @default(false)
-  playCount       Int             @default(0)
-  manualMatched   Boolean         @default(false)
-  createdAt       DateTime        @default(now())
-  updatedAt       DateTime        @updatedAt
-
-  openlistConfig  OpenlistConfig  @relation(fields: [openlistConfigId], references: [id])
-  openlistConfigId Int
-
-  episodes        Episode[]
-  favorites       Favorite[]
-  playEvents      PlayEvent[]
-  watchRooms      WatchRoom[]
-
-  @@unique([openlistConfigId, sourcePath])
-}
-
-// ── 视频集数 ──────────────────────────────────────
-model Episode {
-  id          Int        @id @default(autoincrement())
-  seasonNum   Int        @default(1)
-  episodeNum  Int
-  title       String?
-  openlistPath String    // 只存路径，不存直链
-  duration    Int?       // 秒
-  fileSize    BigInt?
-  createdAt   DateTime   @default(now())
-
-  series      Series     @relation(fields: [seriesId], references: [id], onDelete: Cascade)
-  seriesId    Int
-  progress    WatchProgress[]
-  danmakus    Danmaku[]
-  watchRooms  WatchRoom[]
-
-  @@unique([seriesId, seasonNum, episodeNum])
-}
-
-
-// ── 音乐专辑 ──────────────────────────────────────
-model Album {
-  id          Int             @id @default(autoincrement())
-  title       String
-  artist      String?
-  coverUrl    String?
-  year        Int?
-  genre       String?
-  sourcePath  String
+  id            Int       @id @default(autoincrement())
+  title         String
+  type          MediaType @default(tv)
+  sourcePath    String // OpenList 目录路径
+  tmdbId        Int?
+  posterUrl     String?
+  backdropUrl   String?
+  overview      String?
+  voteAverage   Float?
+  year          Int?
+  genres        Json? // 原 String? 改为 Json?
+  cast          Json? // 原 String? 改为 Json?
+  director      String? // 导演/制作人
+  tmdbData      Json? // 原 String? 改为 Json?
+  isFeatured    Boolean   @default(false)
+  playCount     Int       @default(0)
+  manualMatched Boolean   @default(false)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
   openlistConfig   OpenlistConfig @relation(fields: [openlistConfigId], references: [id])
   openlistConfigId Int
 
-  tracks      Track[]
-  createdAt   DateTime        @default(now())
+  episodes   Episode[]
+  favorites  Favorite[]
+  playEvents PlayEvent[]
+  watchRooms WatchRoom[]
+
+  @@unique([openlistConfigId, sourcePath])
+  @@index([type])
+  @@index([isFeatured])
+  @@index([playCount])
+  @@index([createdAt])
+}
+
+// ── 视频集数 ──────────────────────────────────────
+model Episode {
+  id           Int      @id @default(autoincrement())
+  seasonNum    Int      @default(1)
+  episodeNum   Int
+  title        String?
+  openlistPath String // 只存路径，不存直链
+  duration     Int? // 秒
+  fileSize     BigInt?
+  createdAt    DateTime @default(now())
+
+  series     Series          @relation(fields: [seriesId], references: [id], onDelete: Cascade)
+  seriesId   Int
+  progress   WatchProgress[]
+  danmakus   Danmaku[]
+  watchRooms WatchRoom[]
+
+  @@unique([seriesId, seasonNum, episodeNum])
+  @@index([seriesId])
+  @@index([seasonNum])
+}
+
+// ── 音乐专辑 ──────────────────────────────────────
+model Album {
+  id         Int     @id @default(autoincrement())
+  title      String
+  artist     String?
+  coverUrl   String?
+  year       Int?
+  genre      String?
+  sourcePath String
+
+  openlistConfig   OpenlistConfig @relation(fields: [openlistConfigId], references: [id])
+  openlistConfigId Int
+
+  tracks    Track[]
+  createdAt DateTime @default(now())
 
   @@unique([openlistConfigId, sourcePath])
 }
 
 // ── 音频曲目 ──────────────────────────────────────
 model Track {
-  id           Int      @id @default(autoincrement())
+  id           Int     @id @default(autoincrement())
   trackNum     Int?
   title        String
   artist       String?
@@ -124,55 +129,63 @@ model Track {
   openlistPath String
   lyricsPath   String?
 
-  album        Album    @relation(fields: [albumId], references: [id], onDelete: Cascade)
-  albumId      Int
+  album   Album @relation(fields: [albumId], references: [id], onDelete: Cascade)
+  albumId Int
 
   @@unique([albumId, openlistPath])
 }
 
 // ── 用户 ──────────────────────────────────────────
 model User {
-  id                  Int       @id @default(autoincrement())
-  email               String    @unique
-  passwordHash        String
-  role                Role      @default(user)
-  tokenInvalidatedAt  DateTime? // 用于使所有旧 token 失效（密码重置、强制登出）
-  createdAt           DateTime  @default(now())
+  id                 Int       @id @default(autoincrement())
+  email              String    @unique
+  passwordHash       String
+  role               Role      @default(user)
+  tokenInvalidatedAt DateTime? // 用于使所有旧 token 失效（密码重置、强制登出）
+  createdAt          DateTime  @default(now())
 
   progress            WatchProgress[]
   favorites           Favorite[]
   passwordResetTokens PasswordResetToken[]
   danmakus            Danmaku[]
-  hostedRooms         WatchRoom[]       @relation("RoomHost")
+  hostedRooms         WatchRoom[]          @relation("RoomHost")
   roomMemberships     WatchRoomMember[]
+
+  @@index([email])
+  @@index([role])
 }
 
 // ── 观看进度(云端同步) ─────────────────────────────
 model WatchProgress {
-  id         Int      @id @default(autoincrement())
-  position   Int      @default(0) // 秒
-  duration   Int?
-  updatedAt  DateTime @updatedAt
+  id        Int      @id @default(autoincrement())
+  position  Int      @default(0) // 秒
+  duration  Int?
+  updatedAt DateTime @updatedAt
 
-  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  userId     Int
-  episode    Episode  @relation(fields: [episodeId], references: [id], onDelete: Cascade)
-  episodeId  Int
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    Int
+  episode   Episode @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+  episodeId Int
 
   @@unique([userId, episodeId])
   @@index([userId])
+  @@index([episodeId])
+  @@index([updatedAt])
 }
 
 // ── 收藏 ──────────────────────────────────────────
 model Favorite {
   createdAt DateTime @default(now())
 
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  userId    Int
-  series    Series   @relation(fields: [seriesId], references: [id], onDelete: Cascade)
-  seriesId  Int
+  user     User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId   Int
+  series   Series @relation(fields: [seriesId], references: [id], onDelete: Cascade)
+  seriesId Int
 
   @@id([userId, seriesId])
+  @@index([userId])
+  @@index([seriesId])
+  @@index([createdAt])
 }
 
 // ── 播放统计(防刷) ─────────────────────────────────
@@ -182,25 +195,27 @@ model PlayEvent {
   userId    Int?
   createdAt DateTime @default(now())
 
-  series    Series   @relation(fields: [seriesId], references: [id], onDelete: Cascade)
-  seriesId  Int
+  series   Series @relation(fields: [seriesId], references: [id], onDelete: Cascade)
+  seriesId Int
 
   @@index([ip])
+  @@index([seriesId])
+  @@index([createdAt])
 }
 
 // ── 审计日志 ──────────────────────────────────────
 model AuditLog {
-  id            Int      @id @default(autoincrement())
-  action        String   // AuditAction 枚举值
-  userId        Int?
-  userEmail     String?
-  ipAddress     String
-  resourceType  String?
-  resourceId    Int?
-  details       Json?    // 原 String? 改为 Json?
-  status        String   // "success" | "failure"
-  errorMessage  String?
-  createdAt     DateTime @default(now())
+  id           Int      @id @default(autoincrement())
+  action       String // AuditAction 枚举值
+  userId       Int?
+  userEmail    String?
+  ipAddress    String
+  resourceType String?
+  resourceId   Int?
+  details      Json? // 原 String? 改为 Json?
+  status       String // "success" | "failure"
+  errorMessage String?
+  createdAt    DateTime @default(now())
 
   @@index([userId])
   @@index([action])
@@ -209,22 +224,21 @@ model AuditLog {
 
 // ── 邮箱验证码 ────────────────────────────────────
 model VerificationToken {
-  id         Int      @id @default(autoincrement())
-  email      String
-  token      String
-  expiresAt  DateTime
-  createdAt  DateTime @default(now())
+  id        Int      @id @default(autoincrement())
+  email     String
+  token     String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
 
   @@unique([email, token])
   @@index([email])
 }
 
-
 // ── Token 黑名单 ──────────────────────────────────
 model TokenBlacklist {
   id        Int      @id @default(autoincrement())
   token     String   @unique
-  reason    String   // logout | password_reset | security
+  reason    String // logout | password_reset | security
   expiresAt DateTime
   createdAt DateTime @default(now())
 
@@ -239,8 +253,8 @@ model PasswordResetToken {
   used      Boolean  @default(false)
   createdAt DateTime @default(now())
 
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  userId    Int
+  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId Int
 
   @@index([token])
   @@index([userId])
@@ -249,16 +263,16 @@ model PasswordResetToken {
 // ── 弹幕 ──────────────────────────────────────────
 model Danmaku {
   id        Int      @id @default(autoincrement())
-  text      String   @db.VarChar(200)   // 弹幕文本（限制 200 字）
-  time      Float                       // 出现在视频中的秒数
+  text      String   @db.VarChar(200) // 弹幕文本（限制 200 字）
+  time      Float // 出现在视频中的秒数
   color     String   @default("#FFFFFF") // 弹幕颜色（十六进制）
-  type      Int      @default(0)        // 0=滚动, 1=顶部固定, 2=底部固定
-  fontSize  Int      @default(25)       // 字号（像素）
+  type      Int      @default(0) // 0=滚动, 1=顶部固定, 2=底部固定
+  fontSize  Int      @default(25) // 字号（像素）
   createdAt DateTime @default(now())
 
-  episode   Episode  @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+  episode   Episode @relation(fields: [episodeId], references: [id], onDelete: Cascade)
   episodeId Int
-  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  user      User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
   userId    Int?
 
   @@index([episodeId, time])
@@ -267,21 +281,21 @@ model Danmaku {
 
 // ── 一起看房间 ────────────────────────────────────
 model WatchRoom {
-  id          String   @id @default(cuid())  // 短ID，方便分享
-  name        String   @default("一起看")
+  id          String          @id @default(cuid()) // 短ID，方便分享
+  name        String          @default("一起看")
   status      WatchRoomStatus @default(waiting)
-  currentTime Float    @default(0)           // 当前同步播放位置（秒）
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  currentTime Float           @default(0) // 当前同步播放位置（秒）
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
 
-  host        User     @relation("RoomHost", fields: [hostId], references: [id], onDelete: Cascade)
-  hostId      Int
-  series      Series   @relation(fields: [seriesId], references: [id], onDelete: Cascade)
-  seriesId    Int
-  episode     Episode  @relation(fields: [episodeId], references: [id], onDelete: Cascade)
-  episodeId   Int
+  host      User    @relation("RoomHost", fields: [hostId], references: [id], onDelete: Cascade)
+  hostId    Int
+  series    Series  @relation(fields: [seriesId], references: [id], onDelete: Cascade)
+  seriesId  Int
+  episode   Episode @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+  episodeId Int
 
-  members     WatchRoomMember[]
+  members WatchRoomMember[]
 
   @@index([hostId])
   @@index([status])
@@ -289,13 +303,13 @@ model WatchRoom {
 
 // ── 一起看房间成员 ────────────────────────────────
 model WatchRoomMember {
-  id        Int      @id @default(autoincrement())
-  joinedAt  DateTime @default(now())
+  id       Int      @id @default(autoincrement())
+  joinedAt DateTime @default(now())
 
-  room      WatchRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
-  roomId    String
-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  userId    Int
+  room   WatchRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  roomId String
+  user   User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId Int
 
   @@unique([roomId, userId])
   @@index([userId])

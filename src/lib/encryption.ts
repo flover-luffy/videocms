@@ -92,10 +92,15 @@ function decryptLegacy(ciphertext: string): string {
   ];
   
   // Try the current salt from env, and fallback salts used in previous versions
+  // SECURITY: 移除硬编码的fallback salts以防止后门攻击
+  // 如果需要解密旧数据，必须通过环境变量LEGACY_ENCRYPTION_SALTS提供
+  const legacySalts = process.env.LEGACY_ENCRYPTION_SALTS
+    ? process.env.LEGACY_ENCRYPTION_SALTS.split(',')
+    : [];
+
   const attemptedSalts = [
     ENCRYPTION_CONFIG.SALT,
-    "fallback-salt",
-    "videocms-salt"
+    ...legacySalts
   ];
   
   let lastError: unknown;
