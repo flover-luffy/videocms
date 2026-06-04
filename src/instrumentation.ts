@@ -3,6 +3,20 @@
  */
 export async function register() {
   if (process.env.NEXT_RUNTIME === "nodejs") {
+    // 全局未捕获Promise rejection和异常处理器
+    process.on("unhandledRejection", (reason, promise) => {
+      console.error("[UnhandledRejection] Promise rejection未被捕获:", {
+        reason,
+        promise,
+      });
+      // 在生产环境中，可以将错误发送到错误监控服务
+    });
+
+    process.on("uncaughtException", (error) => {
+      console.error("[UncaughtException] 未捕获的异常:", error);
+      // 记录错误但不立即退出（Next.js会处理）
+    });
+
     // 1. 初始化 Token 黑名单（从数据库加载忘记删除的 token）
     const { initializeTokenBlacklist } =
       await import("@/lib/auth/token-blacklist");

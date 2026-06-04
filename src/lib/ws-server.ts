@@ -423,7 +423,8 @@ export function initWatchRoomWS(
     });
   });
 
-  setInterval(() => {
+  // 心跳检测定时器 - 保存引用以便清理
+  const heartbeatInterval = setInterval(() => {
     const now = Date.now();
     for (const [roomId, room] of rooms) {
       for (const [userId, client] of room) {
@@ -437,6 +438,11 @@ export function initWatchRoomWS(
       }
     }
   }, HEARTBEAT_CHECK_INTERVAL_MS);
+
+  // 清理函数 - 在服务器关闭时调用
+  wss.on('close', () => {
+    clearInterval(heartbeatInterval);
+  });
 
   return wss;
 }

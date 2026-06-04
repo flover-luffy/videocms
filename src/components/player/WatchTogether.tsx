@@ -210,10 +210,25 @@ const WatchTogether: React.FC<WatchTogetherProps> = ({
     }
   }, [chatMessages]);
 
-  // 清理
+  // 清理所有资源
   useEffect(() => {
     return () => {
+      // 清理WebSocket连接
       disconnectWs();
+
+      // 清理所有定时器
+      if (syncTimerRef.current) {
+        clearTimeout(syncTimerRef.current);
+        syncTimerRef.current = null;
+      }
+      if (heartbeatRef.current) {
+        clearInterval(heartbeatRef.current);
+        heartbeatRef.current = null;
+      }
+      if (reconnectTimerRef.current) {
+        clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = null;
+      }
     };
   }, [disconnectWs]);
 
