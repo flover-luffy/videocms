@@ -3,6 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { motion } from "framer-motion";
+import { memo } from "react";
 
 export interface MediaCardProps {
   id: number;
@@ -14,7 +15,7 @@ export interface MediaCardProps {
   type?: string;
 }
 
-export default function MediaCard({
+function MediaCard({
   id,
   title,
   posterUrl,
@@ -81,3 +82,6 @@ export default function MediaCard({
     </motion.div>
   );
 }
+
+// 使用React.memo优化，避免不必要的重渲染
+export default memo(MediaCard);
