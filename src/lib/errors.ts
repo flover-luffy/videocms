@@ -1,6 +1,11 @@
 /**
- * AppError: 携带 HTTP 状态码的自定义错误类
- * 替代在 api-handler.ts 中通过字符串关键字推导状态码的脆弱逻辑
+ * AppError - 自定义错误类
+ * 携带HTTP状态码的错误类，用于API错误处理
+ *
+ * @example
+ * throw AppError.notFound("用户不存在");
+ * throw AppError.badRequest("参数错误");
+ * throw new AppError("自定义错误", 418);
  */
 export class AppError extends Error {
   constructor(
@@ -11,23 +16,51 @@ export class AppError extends Error {
     this.name = "AppError";
   }
 
-  /** 快捷工厂方法 */
-  static notFound(msg: string) {
+  /**
+   * 404 Not Found
+   * @param msg - 错误消息
+   */
+  static notFound(msg: string): AppError {
     return new AppError(msg, 404);
   }
-  static badRequest(msg: string) {
+
+  /**
+   * 400 Bad Request
+   * @param msg - 错误消息
+   */
+  static badRequest(msg: string): AppError {
     return new AppError(msg, 400);
   }
-  static unauthorized(msg: string) {
+
+  /**
+   * 401 Unauthorized
+   * @param msg - 错误消息
+   */
+  static unauthorized(msg: string): AppError {
     return new AppError(msg, 401);
   }
-  static forbidden(msg: string) {
+
+  /**
+   * 403 Forbidden
+   * @param msg - 错误消息
+   */
+  static forbidden(msg: string): AppError {
     return new AppError(msg, 403);
   }
-  static tooManyRequests(msg: string) {
+
+  /**
+   * 429 Too Many Requests
+   * @param msg - 错误消息
+   */
+  static tooManyRequests(msg: string): AppError {
     return new AppError(msg, 429);
   }
-  static badGateway(msg: string) {
+
+  /**
+   * 502 Bad Gateway
+   * @param msg - 错误消息
+   */
+  static badGateway(msg: string): AppError {
     return new AppError(msg, 502);
   }
 }

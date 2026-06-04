@@ -1,20 +1,40 @@
 import { NextRequest, NextResponse } from "next/server";
 import { AppError } from "./errors";
 import { API_TIMEOUT_CONFIG } from "@/config";
+import logger from "./logger";
 
+/**
+ * API路由处理器类型定义
+ * @template T - 路由上下文类型
+ */
 type ApiHandler<T = unknown> = (
   req: NextRequest,
   ctx: T,
 ) => Promise<NextResponse | Response>;
 
+/**
+ * API处理器选项
+ */
 interface ApiHandlerOptions {
+  /** 超时时间（毫秒），默认使用配置值 */
   timeout?: number;
+  /** 请求体最大大小（字节），默认5MB */
   maxBodySize?: number;
 }
 
+/** 默认最大请求体大小：5MB */
 const DEFAULT_MAX_BODY_SIZE = 5 * 1024 * 1024;
+
+/** 写入操作的HTTP方法集合 */
 const WRITE_METHODS = new Set(["POST", "PUT", "DELETE", "PATCH"]);
 
+/**
+ * 为Promise添加超时控制
+ * @param promise - 原始Promise
+ * @param timeoutMs - 超时时间（毫秒）
+ * @param errorMessage - 超时错误消息
+ * @returns 带超时的Promise
+ */
 function withTimeout<T>(
   promise: Promise<T>,
   timeoutMs: number,
@@ -28,6 +48,12 @@ function withTimeout<T>(
   ]);
 }
 
+/**
+ * 检查请求体大小是否在限制范围内
+ * @param req - Next.js请求对象
+ * @param maxBodySize - 最大允许大小（字节）
+ * @returns 是否在限制内
+ */
 async function isRequestBodyWithinLimit(
   req: NextRequest,
   maxBodySize: number,
@@ -44,10 +70,12 @@ async function isRequestBodyWithinLimit(
     return parsedContentLength <= maxBodySize;
   }
 
+  // 对于非写入方法，不检查body大小
   if (!WRITE_METHODS.has(req.method)) {
     return true;
   }
 
+  // 流式读取body并计算大小
   const reader = req.clone().body?.getReader();
   if (!reader) {
     return true;
@@ -72,6 +100,20 @@ async function isRequestBodyWithinLimit(
   }
 }
 
+/**
+ * API处理器包装函数
+ * 提供统一的错误处理、超时控制和请求体大小验证
+ *
+ * @param handler - 实际的API处理函数
+ * @param options - 可选配置项
+ * @returns 包装后的处理器
+ *
+ * @example
+ * export const GET = withApiHandler(async (req) => {
+ *   const data = await fetchData();
+ *   return NextResponse.json({ data });
+ * });
+ */
 export function withApiHandler<T = unknown>(
   handler: ApiHandler<T>,
   options: ApiHandlerOptions = {},
@@ -111,12 +153,14 @@ export function withApiHandler<T = unknown>(
           : undefined;
       const code = (error as { code?: string })?.code;
 
+      // 记录错误日志
       if (process.env.NODE_ENV === "development") {
-        console.error("[API ERROR]", { message, stack, cause });
+        logger.error("[API ERROR]", { message, stack, cause });
       } else {
-        console.error("[API ERROR]", message);
+        logger.error("[API ERROR]", message);
       }
 
+      // AppError统一错误处理
       if (error instanceof AppError) {
         return NextResponse.json(
           { error: error.message },
@@ -124,6 +168,7 @@ export function withApiHandler<T = unknown>(
         );
       }
 
+      // Prisma错误处理
       if (code === "P2025") {
         return NextResponse.json(
           { error: "请求的资源不存在" },
@@ -131,6 +176,7 @@ export function withApiHandler<T = unknown>(
         );
       }
 
+      // 默认错误响应
       const isDev = process.env.NODE_ENV !== "production";
       return NextResponse.json(
         { error: isDev ? message : "Internal Server Error" },
