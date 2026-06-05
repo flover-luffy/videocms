@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import TmdbMatchModal from "@/components/admin/TmdbMatchModal";
 import EmptyStatePanel from "@/components/layout/EmptyStatePanel";
@@ -27,25 +27,25 @@ export default function MediaListTab() {
   const [confirmClearAll, setConfirmClearAll] = useState(false);
   const [matchingItem, setMatchingItem] = useState<AdminMediaItem | null>(null);
 
-  const showMsg = (text: string, type: "success" | "error") => {
+  const showMsg = useCallback((text: string, type: "success" | "error") => {
     setActionMsg({ text, type });
     setTimeout(() => setActionMsg({ text: "", type: "" }), 3000);
-  };
+  }, []);
 
-  const loadMediaItems = async () => {
+  const loadMediaItems = useCallback(async () => {
     const res = await fetch("/api/series?limit=50");
     if (res.ok) {
       const data = await res.json();
       setMediaItems(data.items);
     }
     setMediaLoaded(true);
-  };
+  }, []);
 
   useEffect(() => {
     loadMediaItems().catch(console.error);
-  }, []);
+  }, [loadMediaItems]);
 
-  const handleEnrich = async (seriesId: number) => {
+  const handleEnrich = useCallback(async (seriesId: number) => {
     setEnrichingId(seriesId);
     try {
       const res = await fetchWithCsrf("/api/admin/enrich", {
@@ -68,9 +68,9 @@ export default function MediaListTab() {
     } finally {
       setEnrichingId(null);
     }
-  };
+  }, [showMsg]);
 
-  const handleDeleteMedia = async (id: number) => {
+  const handleDeleteMedia = useCallback(async (id: number) => {
     if (confirmDeleteId !== id) {
       setConfirmDeleteId(id);
       setTimeout(() => setConfirmDeleteId(null), 3000);
@@ -93,9 +93,9 @@ export default function MediaListTab() {
     } catch {
       showMsg("网络请求失败", "error");
     }
-  };
+  }, [confirmDeleteId, showMsg]);
 
-  const handleClearAll = async () => {
+  const handleClearAll = useCallback(async () => {
     if (!confirmClearAll) {
       setConfirmClearAll(true);
       setTimeout(() => setConfirmClearAll(false), 3000);
@@ -112,7 +112,24 @@ export default function MediaListTab() {
       setMediaItems([]);
       showMsg("媒体库已完全清空", "success");
     }
-  };
+  }, [confirmClearAll, showMsg]);
+
+  const handleMatchClose = useCallback(() => {
+    setMatchingItem(null);
+  }, []);
+
+  const handleMatched = useCallback(
+    (updated: { id: number; title: string; posterUrl: string | null; year: number | null }) => {
+      setMediaItems((prev) =>
+        prev.map((item) =>
+          item.id === updated.id ? { ...item, ...updated } : item,
+        ),
+      );
+      showMsg(`手动匹配成功：${updated.title}`, "success");
+      setMatchingItem(null);
+    },
+    [showMsg],
+  );
 
   return (
     <div role="tabpanel" className="w-full space-y-6">
@@ -267,18 +284,8 @@ export default function MediaListTab() {
         <TmdbMatchModal
           seriesId={matchingItem.id}
           seriesTitle={matchingItem.title}
-          onClose={() => {
-            setMatchingItem(null);
-          }}
-          onMatched={(updated) => {
-            setMediaItems((prev) =>
-              prev.map((item) =>
-                item.id === updated.id ? { ...item, ...updated } : item,
-              ),
-            );
-            showMsg(`手动匹配成功：${updated.title}`, "success");
-            setMatchingItem(null);
-          }}
+          onClose={handleMatchClose}
+          onMatched={handleMatched}
         />
       )}
     </div>

@@ -1,5 +1,5 @@
 "use client";
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 
 interface TrackItem {
   id: number;
@@ -15,7 +15,7 @@ export default function AudioPlayer({ tracks }: { tracks: TrackItem[] }) {
   const [loading, setLoading] = useState(false);
   const audioRef = useRef<HTMLAudioElement>(null);
 
-  const playTrack = async (index: number) => {
+  const playTrack = useCallback(async (index: number) => {
     if (index < 0 || index >= tracks.length) return;
     setCurrentTrackIndex(index);
     setLoading(true);
@@ -36,7 +36,7 @@ export default function AudioPlayer({ tracks }: { tracks: TrackItem[] }) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [tracks]);
 
   useEffect(() => {
     if (audioUrl && audioRef.current) {
@@ -45,12 +45,12 @@ export default function AudioPlayer({ tracks }: { tracks: TrackItem[] }) {
     }
   }, [audioUrl]);
 
-  const handleEnded = () => {
+  const handleEnded = useCallback(() => {
     // 自动播放下一首
     if (currentTrackIndex + 1 < tracks.length) {
       playTrack(currentTrackIndex + 1);
     }
-  };
+  }, [currentTrackIndex, tracks.length, playTrack]);
 
   return (
     <div style={{ marginTop: "2rem" }}>

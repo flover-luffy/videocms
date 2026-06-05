@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { withApiHandler } from "@/lib/api-handler";
 import { requireAdmin } from "@/lib/auth/require-auth";
+import { logger } from "@/lib/logger";
 
 /**
  * DELETE /api/admin/media
@@ -21,8 +22,13 @@ export const DELETE = withApiHandler(async (request: NextRequest) => {
     );
   }
 
-  // SQLite 下最简单的全表清空方式
-  await prisma.series.deleteMany({});
-  // 由于 Cascade，Episode 等会自动删除
-  return NextResponse.json({ success: true, message: "所有影视资源已清空" });
+  try {
+    // SQLite 下最简单的全表清空方式
+    await prisma.series.deleteMany({});
+    // 由于 Cascade，Episode 等会自动删除
+    return NextResponse.json({ success: true, message: "所有影视资源已清空" });
+  } catch (error) {
+    logger.error("清空媒体资源失败", error);
+    return NextResponse.json({ error: "清空媒体资源失败" }, { status: 500 });
+  }
 });

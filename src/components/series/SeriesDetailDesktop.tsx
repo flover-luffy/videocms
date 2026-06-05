@@ -2,6 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
+import { memo } from "react";
 import EpisodeListClient from "@/components/series/EpisodeListClient";
 import PageLayout from "@/components/layout/PageLayout";
 import SectionHeading from "@/components/layout/SectionHeading";
@@ -29,7 +30,7 @@ interface SeriesDetailData {
   episodes: SeriesEpisode[];
 }
 
-export default function SeriesDetailDesktop({
+function SeriesDetailDesktop({
   series,
 }: {
   series: SeriesDetailData;
@@ -223,3 +224,5 @@ export default function SeriesDetailDesktop({
     </PageLayout>
   );
 }
+
+export default memo(SeriesDetailDesktop);

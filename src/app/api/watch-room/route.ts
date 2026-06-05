@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { withApiHandler } from "@/lib/api-handler";
 import { requireUser } from "@/lib/auth/require-auth";
 import { WatchRoomService } from "@/services/watch-room.service";
+import { logger } from "@/lib/logger";
 
 /**
  * POST /api/watch-room
@@ -21,14 +22,19 @@ export const POST = withApiHandler(async (req: NextRequest) => {
     );
   }
 
-  const room = await WatchRoomService.createRoom({
-    hostId: user.userId,
-    seriesId,
-    episodeId,
-    name: typeof name === "string" ? name : undefined,
-  });
+  try {
+    const room = await WatchRoomService.createRoom({
+      hostId: user.userId,
+      seriesId,
+      episodeId,
+      name: typeof name === "string" ? name : undefined,
+    });
 
-  return NextResponse.json({ success: true, data: room }, { status: 201 });
+    return NextResponse.json({ success: true, data: room }, { status: 201 });
+  } catch (error) {
+    logger.error("创建观看房间失败", error);
+    return NextResponse.json({ error: "创建观看房间失败" }, { status: 500 });
+  }
 });
 
 /**
@@ -38,40 +44,45 @@ export const POST = withApiHandler(async (req: NextRequest) => {
 export const GET = withApiHandler(async (req: NextRequest) => {
   const user = await requireUser(req);
 
-  const { prisma } = await import("@/lib/db");
+  try {
+    const { prisma } = await import("@/lib/db");
 
-  const memberships = await prisma.watchRoomMember.findMany({
-    where: { userId: user.userId },
-    include: {
-      room: {
-        select: {
-          id: true,
-          name: true,
-          status: true,
-          hostId: true,
-          seriesId: true,
-          episodeId: true,
-          createdAt: true,
-          _count: { select: { members: true } },
+    const memberships = await prisma.watchRoomMember.findMany({
+      where: { userId: user.userId },
+      include: {
+        room: {
+          select: {
+            id: true,
+            name: true,
+            status: true,
+            hostId: true,
+            seriesId: true,
+            episodeId: true,
+            createdAt: true,
+            _count: { select: { members: true } },
+          },
         },
       },
-    },
-    orderBy: { joinedAt: "desc" },
-  });
+      orderBy: { joinedAt: "desc" },
+    });
 
-  const activeRooms = memberships
-    .filter((m) => m.room.status !== "closed")
-    .map((m) => ({
-      id: m.room.id,
-      name: m.room.name,
-      status: m.room.status,
-      hostId: m.room.hostId,
-      isHost: m.room.hostId === user.userId,
-      seriesId: m.room.seriesId,
-      episodeId: m.room.episodeId,
-      memberCount: m.room._count.members,
-      createdAt: m.room.createdAt.toISOString(),
-    }));
+    const activeRooms = memberships
+      .filter((m) => m.room.status !== "closed")
+      .map((m) => ({
+        id: m.room.id,
+        name: m.room.name,
+        status: m.room.status,
+        hostId: m.room.hostId,
+        isHost: m.room.hostId === user.userId,
+        seriesId: m.room.seriesId,
+        episodeId: m.room.episodeId,
+        memberCount: m.room._count.members,
+        createdAt: m.room.createdAt.toISOString(),
+      }));
 
-  return NextResponse.json({ success: true, data: activeRooms });
+    return NextResponse.json({ success: true, data: activeRooms });
+  } catch (error) {
+    logger.error("获取观看房间列表失败", error);
+    return NextResponse.json({ error: "获取观看房间列表失败" }, { status: 500 });
+  }
 });

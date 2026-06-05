@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { searchTmdbCandidates } from "@/lib/tmdb/client";
 import { withApiHandler } from "@/lib/api-handler";
 import { requireAdmin } from "@/lib/auth/require-auth";
+import { logger } from "@/lib/logger";
 
 /**
  * GET /api/admin/tmdb-search?q=关键词
@@ -18,7 +19,11 @@ export const GET = withApiHandler(async (request: NextRequest) => {
     );
   }
 
-  const candidates = await searchTmdbCandidates(query.trim());
-
-  return NextResponse.json({ candidates });
+  try {
+    const candidates = await searchTmdbCandidates(query.trim());
+    return NextResponse.json({ candidates });
+  } catch (error) {
+    logger.error("TMDB 搜索失败", error);
+    return NextResponse.json({ error: "TMDB 搜索失败" }, { status: 500 });
+  }
 });

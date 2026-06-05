@@ -1,11 +1,13 @@
 "use client";
 
+import { memo } from "react";
+
 interface PlayCreditsProps {
   directors?: string[];
   cast: string[];
 }
 
-export default function PlayCredits({ directors, cast }: PlayCreditsProps) {
+function PlayCredits({ directors, cast }: PlayCreditsProps) {
   const hasDirectors = directors && directors.length > 0;
   const hasCast = cast.length > 0;
 
@@ -40,3 +42,5 @@ export default function PlayCredits({ directors, cast }: PlayCreditsProps) {
     </div>
   );
 }
+
+export default memo(PlayCredits);

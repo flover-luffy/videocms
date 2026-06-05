@@ -7,6 +7,7 @@ import { withApiHandler } from "@/lib/api-handler";
 import { RegisterSchema } from "@/lib/validation";
 import { setAuthCookies } from "@/lib/auth/cookies";
 import { createRateLimiter, RATE_LIMITS } from "@/lib/rate-limit";
+import { logger } from "@/lib/logger";
 
 const rateLimiter = createRateLimiter(RATE_LIMITS.auth);
 
@@ -33,60 +34,65 @@ export const POST = withApiHandler(async (request: NextRequest) => {
   }
   const { email, password } = result.data;
 
-  // 1. 检查是否存在
-  const existingUser = await prisma.user.findUnique({ where: { email } });
-  if (existingUser) {
-    return NextResponse.json(
-      { error: "注册失败，请检查邮箱或验证码" },
-      { status: 400 },
-    );
+  try {
+    // 1. 检查是否存在
+    const existingUser = await prisma.user.findUnique({ where: { email } });
+    if (existingUser) {
+      return NextResponse.json(
+        { error: "注册失败，请检查邮箱或验证码" },
+        { status: 400 },
+      );
+    }
+
+    // 2. 校验验证码
+    const codeHash = hashToken(result.data.code);
+    const validToken = await prisma.verificationToken.findFirst({
+      where: {
+        email,
+        token: codeHash,
+        expiresAt: { gt: new Date() },
+      },
+    });
+
+    if (!validToken) {
+      return NextResponse.json({ error: "验证码错误或已过期" }, { status: 400 });
+    }
+
+    // 验证成功，立马废弃该验证码
+    await prisma.verificationToken.delete({ where: { id: validToken.id } });
+
+    // 3. 创建用户（安全固定：注册只能创建普通用户，管理员需通过后台提权）
+    const salt = await bcrypt.genSalt(12);
+    const hash = await bcrypt.hash(password, salt);
+
+    const newUser = await prisma.user.create({
+      data: {
+        email,
+        passwordHash: hash,
+      },
+    });
+
+    // 4. 签发 Token
+    const tokenPayload = {
+      userId: newUser.id,
+      email: newUser.email,
+      role: newUser.role,
+    };
+    const [accessToken, refreshToken] = await Promise.all([
+      signAccessToken(tokenPayload),
+      signRefreshToken(tokenPayload),
+    ]);
+
+    const res = NextResponse.json({
+      user: { id: newUser.id, email: newUser.email, role: newUser.role },
+    });
+
+    // 5. 统一写入双 Token HttpOnly Cookie（与 login 行为一致）
+    setAuthCookies(res, { accessToken, refreshToken });
+
+    return res;
+  } catch (error) {
+    logger.error("用户注册失败", error);
+    return NextResponse.json({ error: "用户注册失败" }, { status: 500 });
   }
-
-  // 2. 校验验证码
-  const codeHash = hashToken(result.data.code);
-  const validToken = await prisma.verificationToken.findFirst({
-    where: {
-      email,
-      token: codeHash,
-      expiresAt: { gt: new Date() },
-    },
-  });
-
-  if (!validToken) {
-    return NextResponse.json({ error: "验证码错误或已过期" }, { status: 400 });
-  }
-
-  // 验证成功，立马废弃该验证码
-  await prisma.verificationToken.delete({ where: { id: validToken.id } });
-
-  // 3. 创建用户（安全固定：注册只能创建普通用户，管理员需通过后台提权）
-  const salt = await bcrypt.genSalt(12);
-  const hash = await bcrypt.hash(password, salt);
-
-  const newUser = await prisma.user.create({
-    data: {
-      email,
-      passwordHash: hash,
-    },
-  });
-
-  // 4. 签发 Token
-  const tokenPayload = {
-    userId: newUser.id,
-    email: newUser.email,
-    role: newUser.role,
-  };
-  const [accessToken, refreshToken] = await Promise.all([
-    signAccessToken(tokenPayload),
-    signRefreshToken(tokenPayload),
-  ]);
-
-  const res = NextResponse.json({
-    user: { id: newUser.id, email: newUser.email, role: newUser.role },
-  });
-
-  // 5. 统一写入双 Token HttpOnly Cookie（与 login 行为一致）
-  setAuthCookies(res, { accessToken, refreshToken });
-
-  return res;
 });

@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { memo } from "react";
 
 interface PlayBreadcrumbProps {
   seriesId: number;
@@ -8,7 +9,7 @@ interface PlayBreadcrumbProps {
   episodeNum: number;
 }
 
-export default function PlayBreadcrumb({
+function PlayBreadcrumb({
   seriesId,
   seriesTitle,
   episodeNum,
@@ -33,3 +34,5 @@ export default function PlayBreadcrumb({
     </nav>
   );
 }
+
+export default memo(PlayBreadcrumb);

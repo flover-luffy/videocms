@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useRef, useState, useCallback } from "react";
+import React, { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import Artplayer from "artplayer";
 import Hls from "hls.js";
 import { motion, AnimatePresence } from "framer-motion";
@@ -107,11 +107,26 @@ const VideoPlayer = ({
   const showSettingsRef = useRef(false);
   const lastAudibleVolumeRef = useRef(0.8);
 
-  const currentIndex = playlist.findIndex((ep) => ep.id === episodeId);
-  const hasNext = currentIndex >= 0 && currentIndex < playlist.length - 1;
-  const nextEpisodeId = hasNext ? playlist[currentIndex + 1].id : null;
-  const prevEpisodeId = currentIndex > 0 ? playlist[currentIndex - 1].id : null;
-  const currentEpisode = currentIndex >= 0 ? playlist[currentIndex] : null;
+  const currentIndex = useMemo(
+    () => playlist.findIndex((ep) => ep.id === episodeId),
+    [playlist, episodeId],
+  );
+  const hasNext = useMemo(
+    () => currentIndex >= 0 && currentIndex < playlist.length - 1,
+    [currentIndex, playlist.length],
+  );
+  const nextEpisodeId = useMemo(
+    () => (hasNext ? playlist[currentIndex + 1].id : null),
+    [hasNext, playlist, currentIndex],
+  );
+  const prevEpisodeId = useMemo(
+    () => (currentIndex > 0 ? playlist[currentIndex - 1].id : null),
+    [currentIndex, playlist],
+  );
+  const currentEpisode = useMemo(
+    () => (currentIndex >= 0 ? playlist[currentIndex] : null),
+    [currentIndex, playlist],
+  );
 
   const formatTime = (seconds: number) => {
     const safeSeconds = normalizeNonNegative(seconds, 0);
@@ -138,13 +153,15 @@ const VideoPlayer = ({
     try {
       const res = await fetch(`/api/play/episode/${episodeId}`);
       if (!res.ok) {
-        if (res.status === 401) throw new Error("SESSION_EXPIRED");
-        throw new Error("无法加载视频资源");
+        if (res.status === 401) throw new Error("会话已过期，请重新登录后继续播放");
+        if (res.status === 403) throw new Error("无权限访问此视频资源");
+        if (res.status === 404) throw new Error("视频资源不存在，可能已被删除");
+        throw new Error(`加载视频失败：服务器返回 ${res.status} 错误`);
       }
       const data = await res.json();
       setVideoInfo(data);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "无法加载视频资源");
+      setError(err instanceof Error ? err.message : "无法加载视频资源，请稍后重试");
     } finally {
       setIsLoading(false);
       isFetchingRef.current = false;
@@ -247,15 +264,20 @@ const VideoPlayer = ({
     showSettingsRef.current = showSettings;
   }, [showSettings]);
 
+  const isM3U8 = useMemo(() => {
+    if (!videoInfo) return false;
+    return (
+      (videoInfo.url || "").toLowerCase().includes(".m3u8") ||
+      (videoInfo.rawUrl || "").toLowerCase().includes(".m3u8")
+    );
+  }, [videoInfo]);
+
   useEffect(() => {
     if (!videoInfo || !containerRef.current) return;
 
     // 使用第一个可用的字幕
     const subs = videoInfo.subtitles || [];
     const defaultSub = subs.find((s) => s.url);
-
-    const isM3U8 = (videoInfo.url || "").toLowerCase().includes(".m3u8") || 
-                   (videoInfo.rawUrl || "").toLowerCase().includes(".m3u8");
 
     const art = new Artplayer({
       container: containerRef.current,
@@ -608,6 +630,7 @@ const VideoPlayer = ({
     seriesId,
     autoNext,
     playbackSpeed,
+    isM3U8,
   ]);
 
   // 全屏状态自愈检查：处理某些浏览器不触发退出全屏事件的情况

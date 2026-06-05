@@ -6,6 +6,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { withApiHandler } from "@/lib/api-handler";
 import { normalizeJsonArray, safeJsonParse } from "@/lib/utils";
+import { logger } from "@/lib/logger";
 
 export const GET = withApiHandler(async (request: NextRequest) => {
   const { searchParams } = request.nextUrl;
@@ -18,49 +19,54 @@ export const GET = withApiHandler(async (request: NextRequest) => {
   if (type && type !== "all") where.type = type;
   if (featured === "true") where.isFeatured = true;
 
-  const [total, items] = await Promise.all([
-    prisma.series.count({ where }),
-    prisma.series.findMany({
-      where,
-      skip: (page - 1) * limit,
-      take: limit,
-      orderBy: [{ isFeatured: "desc" }, { createdAt: "desc" }],
-      select: {
-        id: true,
-        title: true,
-        type: true,
-        posterUrl: true,
-        backdropUrl: true,
-        voteAverage: true,
-        year: true,
-        genres: true,
-        tmdbData: true,
-        isFeatured: true,
-        playCount: true,
-        createdAt: true,
-        _count: { select: { episodes: true } },
-      },
-    }),
-  ]);
+  try {
+    const [total, items] = await Promise.all([
+      prisma.series.count({ where }),
+      prisma.series.findMany({
+        where,
+        skip: (page - 1) * limit,
+        take: limit,
+        orderBy: [{ isFeatured: "desc" }, { createdAt: "desc" }],
+        select: {
+          id: true,
+          title: true,
+          type: true,
+          posterUrl: true,
+          backdropUrl: true,
+          voteAverage: true,
+          year: true,
+          genres: true,
+          tmdbData: true,
+          isFeatured: true,
+          playCount: true,
+          createdAt: true,
+          _count: { select: { episodes: true } },
+        },
+      }),
+    ]);
 
-  return NextResponse.json({
-    items: items.map((s) => {
-      const tmdb = safeJsonParse<Record<string, unknown> | null>(
-        s.tmdbData as string,
-        null,
-      );
-      return {
-        ...s,
-        genres: normalizeJsonArray(s.genres),
-        status: tmdb?.status || null,
-        episodeCount: s._count.episodes,
-        _count: undefined,
-        tmdbData: undefined,
-      };
-    }),
-    total,
-    page,
-    limit,
-    totalPages: Math.ceil(total / limit),
-  });
+    return NextResponse.json({
+      items: items.map((s) => {
+        const tmdb = safeJsonParse<Record<string, unknown> | null>(
+          s.tmdbData as string,
+          null,
+        );
+        return {
+          ...s,
+          genres: normalizeJsonArray(s.genres),
+          status: tmdb?.status || null,
+          episodeCount: s._count.episodes,
+          _count: undefined,
+          tmdbData: undefined,
+        };
+      }),
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    });
+  } catch (error) {
+    logger.error("查询媒体列表失败", error);
+    return NextResponse.json({ error: "查询媒体列表失败" }, { status: 500 });
+  }
 });

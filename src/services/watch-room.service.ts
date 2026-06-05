@@ -54,50 +54,62 @@ export class WatchRoomService {
    * 创建一起看房间
    */
   static async createRoom(input: CreateRoomInput): Promise<RoomInfo> {
-    // 1. 检查用户活跃房间数限制
-    const activeRoomCount = await prisma.watchRoom.count({
-      where: {
-        hostId: input.hostId,
-        status: { not: ROOM_STATUS.CLOSED },
-      },
-    });
-
-    if (activeRoomCount >= MAX_ACTIVE_ROOMS_PER_USER) {
-      throw AppError.badRequest(
-        `At most ${MAX_ACTIVE_ROOMS_PER_USER} active rooms are allowed per user`,
-      );
-    }
-
-    const episode = await prisma.episode.findUnique({
-      where: { id: input.episodeId },
-      select: { id: true, seriesId: true },
-    });
-    if (!episode || episode.seriesId !== input.seriesId) {
-      throw AppError.notFound("Episode does not belong to the series or does not exist");
-    }
-
-    // 3. 创建房间 + 房主自动加入
-    const room = await prisma.watchRoom.create({
-      data: {
-        name: input.name?.trim().slice(0, 50) || "一起看",
-        hostId: input.hostId,
-        seriesId: input.seriesId,
-        episodeId: input.episodeId,
-        status: ROOM_STATUS.WAITING,
-        members: {
-          create: { userId: input.hostId },
+    try {
+      // 1. 检查用户活跃房间数限制
+      const activeRoomCount = await prisma.watchRoom.count({
+        where: {
+          hostId: input.hostId,
+          status: { not: ROOM_STATUS.CLOSED },
         },
-      },
-      include: {
-        members: {
-          include: {
-            user: { select: { id: true, email: true } },
+      });
+
+      if (activeRoomCount >= MAX_ACTIVE_ROOMS_PER_USER) {
+        throw AppError.badRequest(
+          `At most ${MAX_ACTIVE_ROOMS_PER_USER} active rooms are allowed per user`,
+        );
+      }
+
+      const episode = await prisma.episode.findUnique({
+        where: { id: input.episodeId },
+        select: { id: true, seriesId: true },
+      });
+      if (!episode || episode.seriesId !== input.seriesId) {
+        throw AppError.notFound("Episode does not belong to the series or does not exist");
+      }
+
+      // 3. 创建房间 + 房主自动加入
+      const room = await prisma.watchRoom.create({
+        data: {
+          name: input.name?.trim().slice(0, 50) || "一起看",
+          hostId: input.hostId,
+          seriesId: input.seriesId,
+          episodeId: input.episodeId,
+          status: ROOM_STATUS.WAITING,
+          members: {
+            create: { userId: input.hostId },
           },
         },
-      },
-    });
+        include: {
+          members: {
+            include: {
+              user: { select: { id: true, email: true } },
+            },
+          },
+        },
+      });
 
-    return this.formatRoomInfo(room);
+      return this.formatRoomInfo(room);
+    } catch (error) {
+      // AppError 已经包含详细信息，直接重新抛出
+      if (error instanceof AppError) {
+        throw error;
+      }
+      logger.error("[WatchRoomService] Failed to create room:", error);
+      throw new AppError(
+        `创建房间失败: ${error instanceof Error ? error.message : String(error)}`,
+        500,
+      );
+    }
   }
 
   /**
@@ -107,111 +119,147 @@ export class WatchRoomService {
     roomId: string,
     userId: number,
   ): Promise<RoomInfo> {
-    return prisma.$transaction(
-      async (tx) => {
-        const room = await tx.watchRoom.findUnique({
-          where: { id: roomId },
-          include: {
-            members: {
-              include: {
-                user: { select: { id: true, email: true } },
+    try {
+      return await prisma.$transaction(
+        async (tx) => {
+          const room = await tx.watchRoom.findUnique({
+            where: { id: roomId },
+            include: {
+              members: {
+                include: {
+                  user: { select: { id: true, email: true } },
+                },
               },
             },
-          },
-        });
-
-        if (!room) {
-          throw AppError.notFound("Room not found");
-        }
-
-        if (room.status === ROOM_STATUS.CLOSED) {
-          throw AppError.badRequest("Room is closed");
-        }
-
-        const alreadyJoined = room.members.some((m) => m.userId === userId);
-        if (alreadyJoined) {
-          return this.formatRoomInfo(room);
-        }
-
-        if (room.members.length >= MAX_MEMBERS_PER_ROOM) {
-          throw AppError.badRequest("Room is full");
-        }
-
-        try {
-          await tx.watchRoomMember.create({
-            data: { roomId, userId },
           });
-        } catch (error) {
-          if ((error as { code?: string }).code !== "P2002") {
-            throw error;
-          }
-        }
 
-        const updatedRoom = await tx.watchRoom.findUnique({
-          where: { id: roomId },
-          include: {
-            members: {
-              include: {
-                user: { select: { id: true, email: true } },
+          if (!room) {
+            throw AppError.notFound("Room not found");
+          }
+
+          if (room.status === ROOM_STATUS.CLOSED) {
+            throw AppError.badRequest("Room is closed");
+          }
+
+          const alreadyJoined = room.members.some((m) => m.userId === userId);
+          if (alreadyJoined) {
+            return this.formatRoomInfo(room);
+          }
+
+          if (room.members.length >= MAX_MEMBERS_PER_ROOM) {
+            throw AppError.badRequest("Room is full");
+          }
+
+          try {
+            await tx.watchRoomMember.create({
+              data: { roomId, userId },
+            });
+          } catch (error) {
+            if ((error as { code?: string }).code !== "P2002") {
+              throw error;
+            }
+          }
+
+          const updatedRoom = await tx.watchRoom.findUnique({
+            where: { id: roomId },
+            include: {
+              members: {
+                include: {
+                  user: { select: { id: true, email: true } },
+                },
               },
             },
-          },
-        });
+          });
 
-        return this.formatRoomInfo(updatedRoom!);
-      },
-      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
-    );
+          return this.formatRoomInfo(updatedRoom!);
+        },
+        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+      );
+    } catch (error) {
+      // AppError 已经包含详细信息，直接重新抛出
+      if (error instanceof AppError) {
+        throw error;
+      }
+      logger.error("[WatchRoomService] Failed to join room:", error);
+      throw new AppError(
+        `加入房间失败: ${error instanceof Error ? error.message : String(error)}`,
+        500,
+      );
+    }
   }
 
   /**
    * 离开房间
    */
   static async leaveRoom(roomId: string, userId: number): Promise<void> {
-    const room = await prisma.watchRoom.findUnique({
-      where: { id: roomId },
-      select: { id: true, hostId: true, status: true },
-    });
-
-    if (!room) {
-      throw AppError.notFound("Room not found");
-    }
-
-    // 房主离开 = 关闭房间
-    if (room.hostId === userId) {
-      await prisma.watchRoom.update({
+    try {
+      const room = await prisma.watchRoom.findUnique({
         where: { id: roomId },
-        data: { status: ROOM_STATUS.CLOSED },
+        select: { id: true, hostId: true, status: true },
       });
-      return;
-    }
 
-    // 普通成员离开
-    await prisma.watchRoomMember.deleteMany({
-      where: { roomId, userId },
-    });
+      if (!room) {
+        throw AppError.notFound("Room not found");
+      }
+
+      // 房主离开 = 关闭房间
+      if (room.hostId === userId) {
+        await prisma.watchRoom.update({
+          where: { id: roomId },
+          data: { status: ROOM_STATUS.CLOSED },
+        });
+        return;
+      }
+
+      // 普通成员离开
+      await prisma.watchRoomMember.deleteMany({
+        where: { roomId, userId },
+      });
+    } catch (error) {
+      // AppError 已经包含详细信息，直接重新抛出
+      if (error instanceof AppError) {
+        throw error;
+      }
+      logger.error("[WatchRoomService] Failed to leave room:", error);
+      throw new AppError(
+        `离开房间失败: ${error instanceof Error ? error.message : String(error)}`,
+        500,
+      );
+    }
   }
 
   /**
    * 关闭房间（仅房主） */
   static async closeRoom(roomId: string, userId: number): Promise<void> {
-    const room = await prisma.watchRoom.findUnique({
-      where: { id: roomId },
-      select: { id: true, hostId: true },
-    });
+    try {
+      const room = await prisma.watchRoom.findUnique({
+        where: { id: roomId },
+        select: { id: true, hostId: true },
+      });
 
-    if (!room) {
-      throw AppError.notFound("Room not found");
+      if (!room) {
+        throw AppError.notFound("Room not found");
+      }
+
+      if (room.hostId !== userId) {
+        throw AppError.forbidden("只有房主可以关闭房间");
+      }
+
+      await prisma.watchRoom.update({
+        where: { id: roomId },
+        data: { status: ROOM_STATUS.CLOSED },
+      });
+    } catch (error) {
+      // AppError 已经包含详细信息，直接重新抛出
+      if (error instanceof AppError) {
+        throw error;
+      }
+      logger.error("[WatchRoomService] Failed to close room:", error);
+      throw new AppError(
+        `关闭房间失败: ${error instanceof Error ? error.message : String(error)}`,
+        500,
+      );
     }
-
-    if (room.hostId !== userId) {
-      throw AppError.forbidden("只有房主可以关闭房间");
-    }
-
-    await prisma.watchRoom.update({
-      where: { id: roomId },
-      data: { status: ROOM_STATUS.CLOSED },
-    });
   }
   /**
    * 获取房间信息（仅房间成员可见） */
@@ -219,27 +267,39 @@ export class WatchRoomService {
     roomId: string,
     userId: number,
   ): Promise<RoomInfo> {
-    const room = await prisma.watchRoom.findUnique({
-      where: { id: roomId },
-      include: {
-        members: {
-          include: {
-            user: { select: { id: true, email: true } },
+    try {
+      const room = await prisma.watchRoom.findUnique({
+        where: { id: roomId },
+        include: {
+          members: {
+            include: {
+              user: { select: { id: true, email: true } },
+            },
           },
         },
-      },
-    });
+      });
 
-    if (!room) {
-      throw AppError.notFound("Room not found");
+      if (!room) {
+        throw AppError.notFound("Room not found");
+      }
+
+      const isMember = room.members.some((member) => member.userId === userId);
+      if (!isMember) {
+        throw AppError.forbidden("仅房间成员可查看房间信息");
+      }
+
+      return this.formatRoomInfo(room);
+    } catch (error) {
+      // AppError 已经包含详细信息，直接重新抛出
+      if (error instanceof AppError) {
+        throw error;
+      }
+      logger.error("[WatchRoomService] Failed to get room for user:", error);
+      throw new AppError(
+        `获取房间信息失败: ${error instanceof Error ? error.message : String(error)}`,
+        500,
+      );
     }
-
-    const isMember = room.members.some((member) => member.userId === userId);
-    if (!isMember) {
-      throw AppError.forbidden("仅房间成员可查看房间信息");
-    }
-
-    return this.formatRoomInfo(room);
   }
 
   /**
@@ -251,46 +311,66 @@ export class WatchRoomService {
     currentTime: number,
     episodeId?: number,
   ): Promise<void> {
-    const room = await prisma.watchRoom.findUnique({
-      where: { id: roomId },
-      select: { hostId: true },
-    });
+    try {
+      const room = await prisma.watchRoom.findUnique({
+        where: { id: roomId },
+        select: { hostId: true },
+      });
 
-    if (!room) {
-      throw AppError.notFound("Room not found");
-    }
-    if (room.hostId !== hostId) {
-      throw AppError.forbidden("只有房主可以控制播放");
-    }
+      if (!room) {
+        throw AppError.notFound("Room not found");
+      }
+      if (room.hostId !== hostId) {
+        throw AppError.forbidden("只有房主可以控制播放");
+      }
 
-    await prisma.watchRoom.update({
-      where: { id: roomId },
-      data: {
-        status,
-        currentTime,
-        ...(episodeId !== undefined && { episodeId }),
-      },
-    });
+      await prisma.watchRoom.update({
+        where: { id: roomId },
+        data: {
+          status,
+          currentTime,
+          ...(episodeId !== undefined && { episodeId }),
+        },
+      });
+    } catch (error) {
+      // AppError 已经包含详细信息，直接重新抛出
+      if (error instanceof AppError) {
+        throw error;
+      }
+      logger.error("[WatchRoomService] Failed to update play state:", error);
+      throw new AppError(
+        `更新播放状态失败: ${error instanceof Error ? error.message : String(error)}`,
+        500,
+      );
+    }
   }
 
   /**
    * 清理过期房间（由 scheduler 调用） */
   static async cleanupExpiredRooms(): Promise<number> {
-    const expiry = new Date(Date.now() - ROOM_EXPIRY_HOURS * 60 * 60 * 1000);
+    try {
+      const expiry = new Date(Date.now() - ROOM_EXPIRY_HOURS * 60 * 60 * 1000);
 
-    const result = await prisma.watchRoom.updateMany({
-      where: {
-        status: { not: ROOM_STATUS.CLOSED },
-        updatedAt: { lt: expiry },
-      },
-      data: { status: ROOM_STATUS.CLOSED },
-    });
+      const result = await prisma.watchRoom.updateMany({
+        where: {
+          status: { not: ROOM_STATUS.CLOSED },
+          updatedAt: { lt: expiry },
+        },
+        data: { status: ROOM_STATUS.CLOSED },
+      });
 
-    if (result.count > 0) {
-      logger.info(`[WatchRoom] Cleaned ${result.count} expired rooms`);
+      if (result.count > 0) {
+        logger.info(`[WatchRoom] Cleaned ${result.count} expired rooms`);
+      }
+
+      return result.count;
+    } catch (error) {
+      logger.error("[WatchRoomService] Failed to cleanup expired rooms:", error);
+      throw new AppError(
+        `清理过期房间失败: ${error instanceof Error ? error.message : String(error)}`,
+        500,
+      );
     }
-
-    return result.count;
   }
 
   /**

@@ -42,8 +42,7 @@ export default function RegisterPage() {
       const data = await response.json();
       setCaptchaSvg(data.svg || null);
     } catch (error) {
-      const requestError = error as Error;
-      if (signal?.aborted || requestError.name === "AbortError") {
+      if (signal?.aborted || (error instanceof Error && error.name === "AbortError")) {
         return;
       }
       console.error("Failed to fetch captcha:", error);

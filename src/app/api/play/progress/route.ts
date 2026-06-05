@@ -5,6 +5,7 @@ import { requireUser } from "@/lib/auth/require-auth";
 import { withApiHandler } from "@/lib/api-handler";
 import { ProgressSchema } from "@/lib/validation";
 import { ProgressService } from "@/services/progress.service";
+import { logger } from "@/lib/logger";
 
 export const GET = withApiHandler(async (request: NextRequest) => {
   const token = getRequestAuthToken(request);
@@ -28,8 +29,13 @@ export const GET = withApiHandler(async (request: NextRequest) => {
     return NextResponse.json({ error: "Invalid episodeId" }, { status: 400 });
   }
 
-  const result = await ProgressService.getProgress(payload.userId, episodeId);
-  return NextResponse.json(result);
+  try {
+    const result = await ProgressService.getProgress(payload.userId, episodeId);
+    return NextResponse.json(result);
+  } catch (error) {
+    logger.error("获取播放进度失败", error);
+    return NextResponse.json({ error: "获取播放进度失败" }, { status: 500 });
+  }
 });
 
 export const POST = withApiHandler(async (request: NextRequest) => {
@@ -48,13 +54,18 @@ export const POST = withApiHandler(async (request: NextRequest) => {
   const { episodeId, position, duration } = result.data;
   const clientTimestamp = json?.clientTimestamp || Date.now();
 
-  await ProgressService.syncProgress(
-    user.userId,
-    episodeId,
-    position,
-    duration,
-    clientTimestamp,
-  );
+  try {
+    await ProgressService.syncProgress(
+      user.userId,
+      episodeId,
+      position,
+      duration,
+      clientTimestamp,
+    );
 
-  return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    logger.error("同步播放进度失败", error);
+    return NextResponse.json({ error: "同步播放进度失败" }, { status: 500 });
+  }
 });

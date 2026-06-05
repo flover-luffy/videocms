@@ -3,6 +3,7 @@
 import { motion, AnimatePresence, Variants } from "framer-motion";
 import Image from "next/image";
 import Link from "next/link";
+import { memo } from "react";
 
 export interface BannerItem {
   id: number;
@@ -28,7 +29,7 @@ interface HeroBannerDesktopProps {
   swipeConfidenceThreshold: number;
 }
 
-export default function HeroBannerDesktop({
+function HeroBannerDesktop({
   items,
   page,
   direction,
@@ -174,11 +175,11 @@ export default function HeroBannerDesktop({
       </div>
 
       <div className="pointer-events-auto absolute bottom-8 sm:bottom-12 left-[4vw] z-30 flex gap-2">
-        {items.map((_, i) => {
+        {items.map((item, i) => {
           const isActive = i === itemIndex;
           return (
             <button
-              key={i}
+              key={item.id}
               type="button"
               onClick={() => {
                 const newDirection = i > itemIndex ? 1 : -1;
@@ -200,3 +201,5 @@ export default function HeroBannerDesktop({
     </div>
   );
 }
+
+export default memo(HeroBannerDesktop);

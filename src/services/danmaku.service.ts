@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db";
 import { cacheManager } from "@/lib/cache";
 import { AppError } from "@/lib/errors";
+import logger from "@/lib/logger";
 
 // ── 弹幕类型定义 ──────────────────────────────────
 /** 弹幕类型枚举：0=滚动, 1=顶部固定, 2=底部固定 */
@@ -74,40 +75,48 @@ export class DanmakuService {
    * 优先从 Redis/内存缓存读取，缓存未命中时回源数据库
    */
   static async getByEpisode(episodeId: number): Promise<DanmakuItem[]> {
-    const cacheKey = `ep:${episodeId}`;
+    try {
+      const cacheKey = `ep:${episodeId}`;
 
-    const cached = await danmakuCache.get(cacheKey);
-    if (cached) {
-      return cached.items;
+      const cached = await danmakuCache.get(cacheKey);
+      if (cached) {
+        return cached.items;
+      }
+
+      const rows = await prisma.danmaku.findMany({
+        where: { episodeId },
+        take: MAX_DANMAKU_PER_EPISODE_RESPONSE,
+        select: {
+          id: true,
+          text: true,
+          time: true,
+          color: true,
+          type: true,
+          fontSize: true,
+        },
+        orderBy: { time: "asc" },
+      });
+
+      const items: DanmakuItem[] = rows.map((r) => ({
+        id: r.id,
+        text: r.text,
+        time: r.time,
+        color: r.color,
+        type: r.type as DanmakuType,
+        fontSize: r.fontSize,
+      }));
+
+      // 写入缓存
+      await danmakuCache.set(cacheKey, { items, cachedAt: Date.now() });
+
+      return items;
+    } catch (error) {
+      logger.error("[DanmakuService] Failed to get danmaku by episode:", error);
+      throw new AppError(
+        `获取弹幕失败: ${error instanceof Error ? error.message : String(error)}`,
+        500,
+      );
     }
-
-    const rows = await prisma.danmaku.findMany({
-      where: { episodeId },
-      take: MAX_DANMAKU_PER_EPISODE_RESPONSE,
-      select: {
-        id: true,
-        text: true,
-        time: true,
-        color: true,
-        type: true,
-        fontSize: true,
-      },
-      orderBy: { time: "asc" },
-    });
-
-    const items: DanmakuItem[] = rows.map((r) => ({
-      id: r.id,
-      text: r.text,
-      time: r.time,
-      color: r.color,
-      type: r.type as DanmakuType,
-      fontSize: r.fontSize,
-    }));
-
-    // 写入缓存
-    await danmakuCache.set(cacheKey, { items, cachedAt: Date.now() });
-
-    return items;
   }
 
   /**
@@ -115,68 +124,80 @@ export class DanmakuService {
    * 包含频率限制、内容校验、缓存失效
    */
   static async create(input: CreateDanmakuInput): Promise<DanmakuItem> {
-    // 1. 参数校验
-    const cleanText = sanitizeDanmakuText(input.text);
-    if (!cleanText || cleanText.length < 1) {
-      throw AppError.badRequest("弹幕内容不能为空");
-    }
-    if (input.time < 0) {
-      throw AppError.badRequest("弹幕时间不能为负数");
-    }
-    if (input.color && !HEX_COLOR_REGEX.test(input.color)) {
-      throw AppError.badRequest("弹幕颜色格式错误，请使用 #RRGGBB 格式");
-    }
-    const danmakuType: DanmakuType =
-      input.type !== undefined && [0, 1, 2].includes(input.type)
-        ? input.type
-        : 0;
+    try {
+      // 1. 参数校验
+      const cleanText = sanitizeDanmakuText(input.text);
+      if (!cleanText || cleanText.length < 1) {
+        throw AppError.badRequest("弹幕内容不能为空");
+      }
+      if (input.time < 0) {
+        throw AppError.badRequest("弹幕时间不能为负数");
+      }
+      if (input.color && !HEX_COLOR_REGEX.test(input.color)) {
+        throw AppError.badRequest("弹幕颜色格式错误，请使用 #RRGGBB 格式");
+      }
+      const danmakuType: DanmakuType =
+        input.type !== undefined && [0, 1, 2].includes(input.type)
+          ? input.type
+          : 0;
 
-    // 2. 频率限制（基于 userId 或 IP，这里以 userId 为主键）
-    if (input.userId) {
-      await this.enforceRateLimit(input.userId);
+      // 2. 频率限制（基于 userId 或 IP，这里以 userId 为主键）
+      if (input.userId) {
+        await this.enforceRateLimit(input.userId);
+      }
+
+      // 3. 验证 episode 存在
+      const episode = await prisma.episode.findUnique({
+        where: { id: input.episodeId },
+        select: { id: true },
+      });
+      if (!episode) {
+        throw AppError.notFound("指定的集数不存在");
+      }
+
+      // 4. 写入数据库
+      const created = await prisma.danmaku.create({
+        data: {
+          episodeId: input.episodeId,
+          text: cleanText,
+          time: input.time,
+          color: input.color || "#FFFFFF",
+          type: danmakuType,
+          fontSize: input.fontSize ?? 25,
+          userId: input.userId ?? null,
+        },
+        select: {
+          id: true,
+          text: true,
+          time: true,
+          color: true,
+          type: true,
+          fontSize: true,
+        },
+      });
+
+      // 5. 失效该集的弹幕缓存
+      await danmakuCache.delete(`ep:${input.episodeId}`);
+
+      return {
+        id: created.id,
+        text: created.text,
+        time: created.time,
+        color: created.color,
+        type: created.type as DanmakuType,
+        fontSize: created.fontSize,
+      };
+    } catch (error) {
+      // AppError 已经包含详细信息，直接重新抛出
+      if (error instanceof AppError) {
+        throw error;
+      }
+      logger.error("[DanmakuService] Failed to create danmaku:", error);
+      throw new AppError(
+        `创建弹幕失败: ${error instanceof Error ? error.message : String(error)}`,
+        500,
+      );
     }
-
-    // 3. 验证 episode 存在
-    const episode = await prisma.episode.findUnique({
-      where: { id: input.episodeId },
-      select: { id: true },
-    });
-    if (!episode) {
-      throw AppError.notFound("指定的集数不存在");
-    }
-
-    // 4. 写入数据库
-    const created = await prisma.danmaku.create({
-      data: {
-        episodeId: input.episodeId,
-        text: cleanText,
-        time: input.time,
-        color: input.color || "#FFFFFF",
-        type: danmakuType,
-        fontSize: input.fontSize ?? 25,
-        userId: input.userId ?? null,
-      },
-      select: {
-        id: true,
-        text: true,
-        time: true,
-        color: true,
-        type: true,
-        fontSize: true,
-      },
-    });
-
-    // 5. 失效该集的弹幕缓存
-    await danmakuCache.delete(`ep:${input.episodeId}`);
-
-    return {
-      id: created.id,
-      text: created.text,
-      time: created.time,
-      color: created.color,
-      type: created.type as DanmakuType,
-      fontSize: created.fontSize,
-    };
   }
 
   /**
@@ -184,30 +205,42 @@ export class DanmakuService {
    * 每个用户每分钟最多发送 MAX_DANMAKU_PER_MINUTE 条弹幕
    */
   private static async enforceRateLimit(userId: number): Promise<void> {
-    const rateLimitKey = `user:${userId}`;
-    const now = Date.now();
-    const windowMs = 60 * 1000; // 1 分钟窗口
+    try {
+      const rateLimitKey = `user:${userId}`;
+      const now = Date.now();
+      const windowMs = 60 * 1000; // 1 分钟窗口
 
-    const record = await rateLimitCache.get(rateLimitKey);
+      const record = await rateLimitCache.get(rateLimitKey);
 
-    if (record && now - record.windowStart < windowMs) {
-      if (record.count >= MAX_DANMAKU_PER_MINUTE) {
-        throw AppError.tooManyRequests(
-          `弹幕发送过于频繁，每分钟最多 ${MAX_DANMAKU_PER_MINUTE} 条`,
+      if (record && now - record.windowStart < windowMs) {
+        if (record.count >= MAX_DANMAKU_PER_MINUTE) {
+          throw AppError.tooManyRequests(
+            `弹幕发送过于频繁，每分钟最多 ${MAX_DANMAKU_PER_MINUTE} 条`,
+          );
+        }
+        // 递增计数
+        await rateLimitCache.set(
+          rateLimitKey,
+          { count: record.count + 1, windowStart: record.windowStart },
+          60,
+        );
+      } else {
+        // 开启新窗口
+        await rateLimitCache.set(
+          rateLimitKey,
+          { count: 1, windowStart: now },
+          60,
         );
       }
-      // 递增计数
-      await rateLimitCache.set(
-        rateLimitKey,
-        { count: record.count + 1, windowStart: record.windowStart },
-        60,
-      );
-    } else {
-      // 开启新窗口
-      await rateLimitCache.set(
-        rateLimitKey,
-        { count: 1, windowStart: now },
-        60,
+    } catch (error) {
+      // AppError 已经包含详细信息，直接重新抛出
+      if (error instanceof AppError) {
+        throw error;
+      }
+      logger.error("[DanmakuService] Failed to enforce rate limit:", error);
+      throw new AppError(
+        `频率限制检查失败: ${error instanceof Error ? error.message : String(error)}`,
+        500,
       );
     }
   }
@@ -216,6 +249,14 @@ export class DanmakuService {
    * 获取弹幕总数统计（用于管理后台）
    */
   static async getCountByEpisode(episodeId: number): Promise<number> {
-    return prisma.danmaku.count({ where: { episodeId } });
+    try {
+      return await prisma.danmaku.count({ where: { episodeId } });
+    } catch (error) {
+      logger.error("[DanmakuService] Failed to get danmaku count:", error);
+      throw new AppError(
+        `获取弹幕数量失败: ${error instanceof Error ? error.message : String(error)}`,
+        500,
+      );
+    }
   }
 }

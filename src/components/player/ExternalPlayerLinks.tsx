@@ -1,7 +1,7 @@
 /* eslint-disable @next/next/no-img-element */
 "use client";
 
-import React, { useMemo, useState, useRef, useEffect } from "react";
+import React, { useMemo, useState, useRef, useEffect, memo } from "react";
 
 interface PlayerOption {
   name: string;
@@ -115,10 +115,10 @@ const toBase64 = (value: string) => {
  * 外部播放器入口 — 紧凑下拉式设计
  * 默认只展示一个小按钮，点击展开播放器网格
  */
-const ExternalPlayerLinks: React.FC<ExternalPlayerLinksProps> = ({
+function ExternalPlayerLinks({
   url,
   title,
-}) => {
+}: ExternalPlayerLinksProps) {
   const [failedIcons, setFailedIcons] = useState<Record<string, boolean>>({});
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -270,6 +270,6 @@ const ExternalPlayerLinks: React.FC<ExternalPlayerLinksProps> = ({
       )}
     </div>
   );
-};
+}
 
-export default ExternalPlayerLinks;
+export default memo(ExternalPlayerLinks);

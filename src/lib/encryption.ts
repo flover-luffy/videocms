@@ -48,12 +48,12 @@ function isAuthError(error: unknown): boolean {
 
 function parseHexPart(value: string, expectedLength?: number): Buffer {
   if (!value || !HEX_REGEX.test(value)) {
-    throw new Error("Invalid encrypted data format");
+    throw new Error("加密数据格式错误：非法的十六进制字符串");
   }
 
   const buffer = Buffer.from(value, "hex");
   if (expectedLength !== undefined && buffer.byteLength !== expectedLength) {
-    throw new Error("Invalid encrypted data format");
+    throw new Error(`加密数据格式错误：预期长度 ${expectedLength} 字节，实际 ${buffer.byteLength} 字节`);
   }
   return buffer;
 }
@@ -61,12 +61,12 @@ function parseHexPart(value: string, expectedLength?: number): Buffer {
 function decryptV2(ciphertext: string): string {
   const parts = ciphertext.split(":");
   if (parts.length !== 6 || parts[0] !== VERSION) {
-    throw new Error("Invalid encrypted data format");
+    throw new Error(`加密数据格式错误：预期 v2 格式（6 部分），实际 ${parts.length} 部分`);
   }
 
   const iterations = Number.parseInt(parts[1], 10);
   if (!Number.isFinite(iterations) || iterations <= 0) {
-    throw new Error("Invalid encrypted data format");
+    throw new Error(`加密数据格式错误：迭代次数无效 (${parts[1]})`);
   }
 
   const salt = parseHexPart(parts[2], SALT_LENGTH);
@@ -80,7 +80,7 @@ function decryptV2(ciphertext: string): string {
 function decryptLegacy(ciphertext: string): string {
   const parts = ciphertext.split(":");
   if (parts.length !== 3) {
-    throw new Error("Invalid encrypted data format");
+    throw new Error(`加密数据格式错误：预期旧版格式（3 部分），实际 ${parts.length} 部分`);
   }
 
   const [ivHex, encrypted, tagHex] = parts;

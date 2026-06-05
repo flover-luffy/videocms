@@ -2,8 +2,9 @@
 import { withApiHandler } from "@/lib/api-handler";
 import { requireUser } from "@/lib/auth/require-auth";
 import { UserService } from "@/services/user.service";
+import { logger } from "@/lib/logger";
 
-function getPagination(request: NextRequest) {
+function getPagination(request: NextRequest): { limit: number; offset: number } {
   const limit = Number.parseInt(
     request.nextUrl.searchParams.get("limit") || "50",
     10,
@@ -25,9 +26,14 @@ function getPagination(request: NextRequest) {
 export const GET = withApiHandler(async (request: NextRequest) => {
   const user = await requireUser(request);
   const { limit, offset } = getPagination(request);
-  const favorites = await UserService.getFavorites(user.userId, limit, offset);
 
-  return NextResponse.json({ items: favorites });
+  try {
+    const favorites = await UserService.getFavorites(user.userId, limit, offset);
+    return NextResponse.json({ items: favorites });
+  } catch (error) {
+    logger.error("获取收藏列表失败", error);
+    return NextResponse.json({ error: "获取收藏列表失败" }, { status: 500 });
+  }
 });
 
 export const POST = withApiHandler(async (request: NextRequest) => {
@@ -43,6 +49,11 @@ export const POST = withApiHandler(async (request: NextRequest) => {
     return NextResponse.json({ error: "Invalid seriesId" }, { status: 400 });
   }
 
-  const result = await UserService.toggleFavorite(user.userId, seriesId);
-  return NextResponse.json(result);
+  try {
+    const result = await UserService.toggleFavorite(user.userId, seriesId);
+    return NextResponse.json(result);
+  } catch (error) {
+    logger.error("切换收藏状态失败", error);
+    return NextResponse.json({ error: "切换收藏状态失败" }, { status: 500 });
+  }
 });

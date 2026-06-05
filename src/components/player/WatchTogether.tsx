@@ -257,25 +257,28 @@ const WatchTogether: React.FC<WatchTogetherProps> = ({
     (msg: WatchRoomMessage) => {
       switch (msg.type) {
         case WS_MSG.ROOM_STATE: {
-          const members = msg.payload.members as RoomMember[];
-          setRoom((prev) =>
-            prev
-              ? {
-                  ...prev,
-                  memberCount: members.length,
-                  members,
-                }
-              : prev,
-          );
+          if (Array.isArray(msg.payload.members)) {
+            const members = msg.payload.members as RoomMember[];
+            setRoom((prev) =>
+              prev
+                ? {
+                    ...prev,
+                    memberCount: members.length,
+                    members,
+                  }
+                : prev,
+            );
+          }
           break;
         }
         case WS_MSG.MEMBER_JOIN: {
           setRoom((prev) => {
             if (!prev) return prev;
-            const newMember: RoomMember = {
-              userId: msg.payload.userId as number,
-              email: msg.payload.email as string,
-            };
+            const { userId, email } = msg.payload;
+            if (typeof userId !== "number" || typeof email !== "string") {
+              return prev;
+            }
+            const newMember: RoomMember = { userId, email };
             // 避免重复
             if (prev.members.some((m) => m.userId === newMember.userId)) {
               return prev;
@@ -289,22 +292,22 @@ const WatchTogether: React.FC<WatchTogetherProps> = ({
           break;
         }
         case WS_MSG.MEMBER_LEAVE: {
-          const leftUserId = msg.payload.userId as number;
-          setRoom((prev) => {
-            if (!prev) return prev;
-            return {
-              ...prev,
-              memberCount: Math.max(0, prev.memberCount - 1),
-              members: prev.members.filter(
-                (m) => m.userId !== leftUserId,
-              ),
-            };
-          });
+          const { userId } = msg.payload;
+          if (typeof userId === "number") {
+            setRoom((prev) => {
+              if (!prev) return prev;
+              return {
+                ...prev,
+                memberCount: Math.max(0, prev.memberCount - 1),
+                members: prev.members.filter((m) => m.userId !== userId),
+              };
+            });
+          }
           break;
         }
         case WS_MSG.PLAY_SYNC: {
-          const action = msg.payload.action as string;
-          const syncTime = msg.payload.currentTime as number;
+          const { action, currentTime: syncTime } = msg.payload;
+          if (typeof action !== "string") break;
 
           switch (action) {
             case "play":
@@ -326,20 +329,25 @@ const WatchTogether: React.FC<WatchTogetherProps> = ({
           break;
         }
         case WS_MSG.CHAT_MSG: {
-          setChatMessages((prev) => [
-            ...prev.slice(-99), // 保留最近 100 条
-            {
-              userId: msg.payload.userId as number,
-              email: msg.payload.email as string,
-              text: msg.payload.text as string,
-              timestamp: msg.payload.timestamp as number,
-            },
-          ]);
+          const { userId, email, text, timestamp } = msg.payload;
+          if (
+            typeof userId === "number" &&
+            typeof email === "string" &&
+            typeof text === "string" &&
+            typeof timestamp === "number"
+          ) {
+            setChatMessages((prev) => [
+              ...prev.slice(-99), // 保留最近 100 条
+              { userId, email, text, timestamp },
+            ]);
+          }
           break;
         }
         case WS_MSG.ERROR: {
-          setError(msg.payload.message as string);
-          setTimeout(() => setError(null), 3000);
+          if (typeof msg.payload.message === "string") {
+            setError(msg.payload.message);
+            setTimeout(() => setError(null), 3000);
+          }
           break;
         }
       }
@@ -388,7 +396,10 @@ const WatchTogether: React.FC<WatchTogetherProps> = ({
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        throw new Error((data as { error?: string }).error || "创建失败");
+        const errorMessage = typeof data === "object" && data !== null && "error" in data && typeof data.error === "string"
+          ? data.error
+          : "创建失败";
+        throw new Error(errorMessage);
       }
       const result = await res.json();
       setRoom(result.data);
@@ -413,7 +424,10 @@ const WatchTogether: React.FC<WatchTogetherProps> = ({
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        throw new Error((data as { error?: string }).error || "加入失败");
+        const errorMessage = typeof data === "object" && data !== null && "error" in data && typeof data.error === "string"
+          ? data.error
+          : "加入失败";
+        throw new Error(errorMessage);
       }
       const result = await res.json();
       setRoom(result.data);

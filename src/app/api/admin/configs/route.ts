@@ -13,14 +13,20 @@ import { encrypt } from "@/lib/encryption";
 import { requireAdmin } from "@/lib/auth/require-auth";
 import { enforceIdempotency } from "@/lib/idempotency";
 import { assertAllowedOutboundUrl } from "@/lib/url-security";
+import { logger } from "@/lib/logger";
 
 export const GET = withApiHandler(async (request: NextRequest) => {
   await requireAdmin(request);
-  const configs = await prisma.openlistConfig.findMany({
-    orderBy: { id: "asc" },
-    select: { id: true, name: true, host: true, createdAt: true },
-  });
-  return NextResponse.json(configs);
+  try {
+    const configs = await prisma.openlistConfig.findMany({
+      orderBy: { id: "asc" },
+      select: { id: true, name: true, host: true, createdAt: true },
+    });
+    return NextResponse.json(configs);
+  } catch (error) {
+    logger.error("查询配置列表失败", error);
+    return NextResponse.json({ error: "查询配置列表失败" }, { status: 500 });
+  }
 });
 
 export const POST = withApiHandler(async (request: NextRequest) => {
@@ -49,26 +55,31 @@ export const POST = withApiHandler(async (request: NextRequest) => {
       );
     }
 
-    // 测试连通性
-    const client = createOpenListClient(normalizedHost, token);
-    const ok = await client.ping();
-    if (!ok) {
-      return NextResponse.json(
-        { error: "无法连接到该 OpenList 实例，请检查 Host 和 Token" },
-        { status: 422 },
-      );
+    try {
+      // 测试连通性
+      const client = createOpenListClient(normalizedHost, token);
+      const ok = await client.ping();
+      if (!ok) {
+        return NextResponse.json(
+          { error: "无法连接到该 OpenList 实例，请检查 Host 和 Token" },
+          { status: 422 },
+        );
+      }
+
+      // 加密 token 后存储
+      const encryptedToken = encrypt(token);
+      const config = await prisma.openlistConfig.create({
+        data: { name, host: normalizedHost, token: encryptedToken },
+      });
+
+      return NextResponse.json({
+        id: config.id,
+        name: config.name,
+        host: config.host,
+      });
+    } catch (error) {
+      logger.error("创建配置失败", error);
+      return NextResponse.json({ error: "创建配置失败" }, { status: 500 });
     }
-
-    // 加密 token 后存储
-    const encryptedToken = encrypt(token);
-    const config = await prisma.openlistConfig.create({
-      data: { name, host: normalizedHost, token: encryptedToken },
-    });
-
-    return NextResponse.json({
-      id: config.id,
-      name: config.name,
-      host: config.host,
-    });
   });
 });

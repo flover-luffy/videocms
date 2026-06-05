@@ -23,28 +23,34 @@ export const DELETE = withApiHandler(
       return NextResponse.json({ error: "Invalid config ID" }, { status: 400 });
     }
 
-    // 检查是否还有剧集关联到此配置
-    const seriesCount = await prisma.series.count({
-      where: { openlistConfigId: configId },
-    });
-    const albumCount = await prisma.album.count({
-      where: { openlistConfigId: configId },
-    });
+    try {
+      // 检查是否还有剧集关联到此配置
+      const seriesCount = await prisma.series.count({
+        where: { openlistConfigId: configId },
+      });
+      const albumCount = await prisma.album.count({
+        where: { openlistConfigId: configId },
+      });
 
-    if (seriesCount > 0 || albumCount > 0) {
-      return NextResponse.json(
-        {
-          error: `删除失败：该连接下仍有 ${seriesCount} 个剧集和 ${albumCount} 个专辑。请先在媒体控制台将其下架。`,
-        },
-        { status: 400 },
-      );
+      if (seriesCount > 0 || albumCount > 0) {
+        return NextResponse.json(
+          {
+            error: `删除失败：该连接下仍有 ${seriesCount} 个剧集和 ${albumCount} 个专辑。请先在媒体控制台将其下架。`,
+          },
+          { status: 400 },
+        );
+      }
+
+      await prisma.openlistConfig.delete({
+        where: { id: configId },
+      });
+
+      return NextResponse.json({ success: true });
+    } catch (error) {
+      const { logger } = await import("@/lib/logger");
+      logger.error("删除配置失败", error);
+      return NextResponse.json({ error: "删除配置失败" }, { status: 500 });
     }
-
-    await prisma.openlistConfig.delete({
-      where: { id: configId },
-    });
-
-    return NextResponse.json({ success: true });
   },
 );
 
@@ -86,23 +92,29 @@ export const PUT = withApiHandler(
       );
     }
 
-    // 加密 token 后更新
-    const encryptedToken = encrypt(token);
-    const updated = await prisma.openlistConfig.update({
-      where: { id: configId },
-      data: {
-        name,
-        host: normalizedHost,
-        token: encryptedToken,
-      },
-      select: {
-        id: true,
-        name: true,
-        host: true,
-        createdAt: true,
-      },
-    });
+    try {
+      // 加密 token 后更新
+      const encryptedToken = encrypt(token);
+      const updated = await prisma.openlistConfig.update({
+        where: { id: configId },
+        data: {
+          name,
+          host: normalizedHost,
+          token: encryptedToken,
+        },
+        select: {
+          id: true,
+          name: true,
+          host: true,
+          createdAt: true,
+        },
+      });
 
-    return NextResponse.json(updated);
+      return NextResponse.json(updated);
+    } catch (error) {
+      const { logger } = await import("@/lib/logger");
+      logger.error("更新配置失败", error);
+      return NextResponse.json({ error: "更新配置失败" }, { status: 500 });
+    }
   },
 );

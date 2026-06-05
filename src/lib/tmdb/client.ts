@@ -125,7 +125,7 @@ export async function searchTmdbMetadata(
   const cacheKey = `tmdb:${title}`;
   const cached = await tmdbMetadataCache.get(cacheKey);
   if (cached !== null) {
-    return cached as TmdbMetadata | null;
+    return cached;
   }
 
   return queue.add(async () => {

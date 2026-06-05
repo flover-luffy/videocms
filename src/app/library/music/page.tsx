@@ -18,20 +18,24 @@ export default function MusicLibraryPage() {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    fetch("/api/music/albums")
-      .then((res) => res.json())
-      .then((data) => {
+    const fetchAlbums = async () => {
+      try {
+        const res = await fetch("/api/music/albums");
+        const data = await res.json();
         if (data.items) {
           setAlbums(data.items);
         } else if (data.error) {
           setError(data.error);
         }
-      })
-      .catch((error) => {
+      } catch (error) {
         console.error("[MusicLibrary] 获取专辑列表失败:", error);
         setError("网络请求失败");
-      })
-      .finally(() => setLoading(false));
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchAlbums();
   }, []);
 
   return (

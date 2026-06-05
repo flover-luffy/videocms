@@ -1,6 +1,6 @@
 "use client";
 
-import { ReactNode } from "react";
+import { ReactNode, memo } from "react";
 
 interface SectionHeadingProps {
   title: ReactNode;
@@ -8,7 +8,7 @@ interface SectionHeadingProps {
   className?: string;
 }
 
-export default function SectionHeading({
+function SectionHeading({
   title,
   action,
   className = "",
@@ -28,3 +28,5 @@ export default function SectionHeading({
     </div>
   );
 }
+
+export default memo(SectionHeading);

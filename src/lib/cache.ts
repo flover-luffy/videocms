@@ -111,7 +111,7 @@ class MemoryCache<T extends object> implements ICache<T>, ISyncCache<T> {
       const staleValue = this.cache.get(key, { allowStale: true });
       if (staleValue !== undefined) {
         console.warn(`[Cache:Memory] 上游请求失败，使用陈旧缓存兜底: ${key}`);
-        return staleValue as T;
+        return staleValue;
       }
       console.error(`[Cache:Memory] 上游请求失败且无缓存可兜底: ${key}`, error);
       return null;
@@ -309,7 +309,7 @@ class RedisCache<T extends object> implements ICache<T> {
         const staleData = await this.client.get(`${this.getKey(key)}:stale`);
         if (staleData) {
           console.warn(`[Cache:Redis] 上游请求失败，使用陈旧缓存兜底: ${key}`);
-          return JSON.parse(staleData) as T;
+          return JSON.parse(staleData);
         }
       } catch (err) {
         console.error("[Cache:Redis] 兜底获取失败", err);
@@ -348,7 +348,9 @@ class CacheManager {
       }
       this.caches.set(name, cacheInstance);
     }
-    return this.caches.get(name) as unknown as ICache<T>;
+    // Type assertion is necessary here due to Map type constraints
+    // The cache is created with the correct generic type T
+    return this.caches.get(name) as ICache<T>;
   }
 
   async clearAll(): Promise<void> {

@@ -2,8 +2,9 @@
 import { withApiHandler } from "@/lib/api-handler";
 import { requireUser } from "@/lib/auth/require-auth";
 import { UserService } from "@/services/user.service";
+import { logger } from "@/lib/logger";
 
-function getPagination(request: NextRequest) {
+function getPagination(request: NextRequest): { limit: number; offset: number } {
   const limit = Number.parseInt(
     request.nextUrl.searchParams.get("limit") || "50",
     10,
@@ -25,33 +26,45 @@ function getPagination(request: NextRequest) {
 export const GET = withApiHandler(async (request: NextRequest) => {
   const user = await requireUser(request);
   const { limit, offset } = getPagination(request);
-  const history = await UserService.getWatchHistory(user.userId, limit, offset);
 
-  return NextResponse.json({
-    history: history.map((item) => ({
-      id: item.id,
-      episodeId: item.episodeId,
-      position: item.position,
-      duration: item.duration,
-      updatedAt: item.updatedAt,
-      episode: {
-        id: item.episode.id,
-        episodeNum: item.episode.episodeNum,
-        seasonNum: item.episode.seasonNum,
-        title: item.episode.title,
-        series: {
-          id: item.episode.series.id,
-          title: item.episode.series.title,
-          posterUrl: item.episode.series.posterUrl,
-          backdropUrl: item.episode.series.backdropUrl,
+  try {
+    const history = await UserService.getWatchHistory(user.userId, limit, offset);
+
+    return NextResponse.json({
+      history: history.map((item) => ({
+        id: item.id,
+        episodeId: item.episodeId,
+        position: item.position,
+        duration: item.duration,
+        updatedAt: item.updatedAt,
+        episode: {
+          id: item.episode.id,
+          episodeNum: item.episode.episodeNum,
+          seasonNum: item.episode.seasonNum,
+          title: item.episode.title,
+          series: {
+            id: item.episode.series.id,
+            title: item.episode.series.title,
+            posterUrl: item.episode.series.posterUrl,
+            backdropUrl: item.episode.series.backdropUrl,
+          },
         },
-      },
-    })),
-  });
+      })),
+    });
+  } catch (error) {
+    logger.error("获取观看历史失败", error);
+    return NextResponse.json({ error: "获取观看历史失败" }, { status: 500 });
+  }
 });
 
 export const DELETE = withApiHandler(async (request: NextRequest) => {
   const user = await requireUser(request);
-  await UserService.clearWatchHistory(user.userId);
-  return NextResponse.json({ success: true });
+
+  try {
+    await UserService.clearWatchHistory(user.userId);
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    logger.error("清空观看历史失败", error);
+    return NextResponse.json({ error: "清空观看历史失败" }, { status: 500 });
+  }
 });

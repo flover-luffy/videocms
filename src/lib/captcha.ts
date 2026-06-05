@@ -36,7 +36,7 @@ interface CaptchaResult {
  * @param width 宽度
  * @param height 高度
  */
-export function generateCaptcha(width = 120, height = 40): CaptchaResult {
+export function generateCaptcha(width: number = 120, height: number = 40): CaptchaResult {
   const chars = "0123456789";
   let text = "";
   for (let i = 0; i < 6; i++) {

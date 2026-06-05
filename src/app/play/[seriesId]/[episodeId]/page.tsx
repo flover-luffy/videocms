@@ -114,9 +114,9 @@ export default function PlayPage({
                 <div className="space-y-6">
                   <div className="h-6 w-32 rounded-full bg-white/5 animate-pulse" />
                   <div className="grid grid-cols-5 gap-2">
-                    {Array.from({ length: 15 }).map((_, index) => (
+                    {Array.from({ length: 15 }, (_, index) => index).map((id) => (
                       <div
-                        key={index}
+                        key={`skeleton-${id}`}
                         className="aspect-[2/1] rounded-lg bg-white/5 animate-pulse"
                       />
                     ))}

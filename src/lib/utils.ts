@@ -3,12 +3,22 @@
  */
 
 /**
+ * 类型守卫：检查数组元素是否全为字符串
+ */
+function isStringArray(value: unknown[]): value is string[] {
+  return value.every((item) => typeof item === "string");
+}
+
+/**
  * 规范化 Json 数组输出
  * 适配 Postgres 驱动可能返回 JSON 字符串或数组的情况
  */
 export function normalizeJsonArray(input: unknown): string[] {
   if (!input) return [];
-  if (Array.isArray(input)) return input as string[];
+
+  if (Array.isArray(input)) {
+    return isStringArray(input) ? input : input.map(String);
+  }
 
   if (typeof input === "string") {
     try {
@@ -27,11 +37,18 @@ export function normalizeJsonArray(input: unknown): string[] {
 }
 
 /**
+ * 类型守卫：检查值是否为非null对象
+ */
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
  * 安全解析 JSON (支持对象、字符串、Null)
  */
 export function safeJsonParse<T>(input: unknown, defaultValue: T): T {
   if (input === null || input === undefined) return defaultValue;
-  if (typeof input === "object" && !Array.isArray(input)) return input as T;
+  if (isObject(input)) return input as T;
   if (typeof input === "string" && input.trim() !== "") {
     try {
       return JSON.parse(input);

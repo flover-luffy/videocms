@@ -5,6 +5,7 @@ import { withApiHandler } from "@/lib/api-handler";
 import { verifyToken } from "@/lib/auth/jwt";
 import { getRequestAuthToken } from "@/lib/auth/request-token";
 import { decrypt, isEncrypted } from "@/lib/encryption";
+import { logger } from "@/lib/logger";
 
 export const GET = withApiHandler(
   async (
@@ -30,33 +31,38 @@ export const GET = withApiHandler(
       return NextResponse.json({ error: "Invalid track ID" }, { status: 400 });
     }
 
-    const track = await prisma.track.findUnique({
-      where: { id: trackId },
-      include: {
-        album: {
-          include: { openlistConfig: true },
+    try {
+      const track = await prisma.track.findUnique({
+        where: { id: trackId },
+        include: {
+          album: {
+            include: { openlistConfig: true },
+          },
         },
-      },
-    });
+      });
 
-    if (!track) {
-      return NextResponse.json({ error: "Track not found" }, { status: 404 });
+      if (!track) {
+        return NextResponse.json({ error: "Track not found" }, { status: 404 });
+      }
+
+      const config = track.album.openlistConfig;
+      const decryptedToken = isEncrypted(config.token)
+        ? decrypt(config.token)
+        : config.token;
+      const client = createOpenListClient(config.host, decryptedToken);
+
+      const fileInfo = await client.getFile(track.openlistPath);
+      const rawUrl = fileInfo.raw_url;
+
+      // 我们对于常见音频拓展名尽量直接使用原始链，避免拖垮自有的 proxy 节点带宽
+      return NextResponse.json({
+        url: rawUrl,
+        title: track.title,
+        artist: track.artist || track.album.artist,
+      });
+    } catch (error) {
+      logger.error("获取音乐播放链接失败", error);
+      return NextResponse.json({ error: "获取音乐播放链接失败" }, { status: 500 });
     }
-
-    const config = track.album.openlistConfig;
-    const decryptedToken = isEncrypted(config.token)
-      ? decrypt(config.token)
-      : config.token;
-    const client = createOpenListClient(config.host, decryptedToken);
-
-    const fileInfo = await client.getFile(track.openlistPath);
-    const rawUrl = fileInfo.raw_url;
-
-    // 我们对于常见音频拓展名尽量直接使用原始链，避免拖垮自有的 proxy 节点带宽
-    return NextResponse.json({
-      url: rawUrl,
-      title: track.title,
-      artist: track.artist || track.album.artist,
-    });
   },
 );

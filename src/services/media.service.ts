@@ -7,6 +7,8 @@ import { normalizePath } from "@/lib/openlist/utils";
 import { decrypt, isEncrypted } from "@/lib/encryption";
 import { sanitizePath } from "@/lib/sanitize";
 import { batchCheckExisting, withTransaction } from "@/lib/import-batch";
+import { AppError } from "@/lib/errors";
+import logger from "@/lib/logger";
 
 export class MediaService {
   private static async resolveAlbumCoverUrl(
@@ -31,7 +33,7 @@ export class MediaService {
       const fileInfo = await client.getFile(normalizePath(coverImg.path));
       return fileInfo.raw_url;
     } catch (err) {
-      console.warn("[MediaService] Failed to fetch cover direct link:", err);
+      logger.warn("[MediaService] Failed to fetch cover direct link:", err);
       return null;
     }
   }
@@ -134,7 +136,7 @@ export class MediaService {
 
       if (result.shouldAutoEnrich) {
         this.enrichMetadata(result.seriesId, inferredTitle).catch((err) =>
-          console.error("[MediaService] Metadata enrichment failed:", err),
+          logger.error("[MediaService] Metadata enrichment failed:", err),
         );
       }
 
@@ -147,8 +149,10 @@ export class MediaService {
         message: `成功导入 ${result.newEpisodesCount} 个新集数，元数据后台更新中`,
       };
     } catch (error) {
-      throw new Error(
-        `Invalid series path: ${error instanceof Error ? error.message : String(error)}`,
+      logger.error("[MediaService] Failed to import series:", error);
+      throw new AppError(
+        `导入剧集失败: ${error instanceof Error ? error.message : String(error)}`,
+        500,
       );
     }
   }
@@ -260,37 +264,47 @@ export class MediaService {
         duration: result.duration,
       };
     } catch (error) {
-      throw new Error(
-        `Invalid music path: ${error instanceof Error ? error.message : String(error)}`,
+      logger.error("[MediaService] Failed to import music:", error);
+      throw new AppError(
+        `导入音乐失败: ${error instanceof Error ? error.message : String(error)}`,
+        500,
       );
     }
   }
 
   private static async enrichMetadata(seriesId: number, title: string) {
-    const meta = await searchTmdbMetadata(title);
-    if (!meta) {
-      return;
-    }
+    try {
+      const meta = await searchTmdbMetadata(title);
+      if (!meta) {
+        return;
+      }
 
-    // 仅允许自动补全更新“未手动锁定”的条目，避免手动匹配结果被后续扫描覆盖
-    await prisma.series.updateMany({
-      where: {
-        id: seriesId,
-        manualMatched: false,
-      },
-      data: {
-        tmdbId: meta.tmdbId,
-        posterUrl: meta.posterUrl,
-        backdropUrl: meta.backdropUrl,
-        overview: meta.overview,
-        year: meta.year,
-        voteAverage: meta.voteAverage,
-        genres: (meta.genres as Prisma.InputJsonValue) || [],
-        type: meta.type,
-        director: meta.director || undefined,
-        cast: (meta.cast as Prisma.InputJsonValue) || undefined,
-        tmdbData: (meta.tmdbData as Prisma.InputJsonValue) || undefined,
-      },
-    });
+      // 仅允许自动补全更新”未手动锁定”的条目，避免手动匹配结果被后续扫描覆盖
+      await prisma.series.updateMany({
+        where: {
+          id: seriesId,
+          manualMatched: false,
+        },
+        data: {
+          tmdbId: meta.tmdbId,
+          posterUrl: meta.posterUrl,
+          backdropUrl: meta.backdropUrl,
+          overview: meta.overview,
+          year: meta.year,
+          voteAverage: meta.voteAverage,
+          genres: (meta.genres as Prisma.InputJsonValue) || [],
+          type: meta.type,
+          director: meta.director || undefined,
+          cast: (meta.cast as Prisma.InputJsonValue) || undefined,
+          tmdbData: (meta.tmdbData as Prisma.InputJsonValue) || undefined,
+        },
+      });
+    } catch (error) {
+      logger.error('[MediaService] Failed to enrich metadata:', error);
+      throw new AppError(
+        `元数据补全失败: ${error instanceof Error ? error.message : String(error)}`,
+        500,
+      );
+    }
   }
 }

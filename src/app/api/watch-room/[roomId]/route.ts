@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { withApiHandler } from "@/lib/api-handler";
 import { requireUser } from "@/lib/auth/require-auth";
 import { WatchRoomService } from "@/services/watch-room.service";
+import { logger } from "@/lib/logger";
 
 type RouteContext = { params: Promise<{ roomId: string }> };
 
@@ -13,8 +14,13 @@ export const GET = withApiHandler(async (req: NextRequest, ctx: RouteContext) =>
   const user = await requireUser(req);
   const { roomId } = await ctx.params;
 
-  const room = await WatchRoomService.getRoomForUser(roomId, user.userId);
-  return NextResponse.json({ success: true, data: room });
+  try {
+    const room = await WatchRoomService.getRoomForUser(roomId, user.userId);
+    return NextResponse.json({ success: true, data: room });
+  } catch (error) {
+    logger.error("获取房间详情失败", error);
+    return NextResponse.json({ error: "获取房间详情失败" }, { status: 500 });
+  }
 });
 
 /**
@@ -28,32 +34,37 @@ export const POST = withApiHandler(async (req: NextRequest, ctx: RouteContext) =
   const body = await req.json();
   const action = body.action;
 
-  switch (action) {
-    case "join": {
-      const room = await WatchRoomService.joinRoom(roomId, user.userId);
-      return NextResponse.json({ success: true, data: room });
-    }
-    case "leave": {
-      await WatchRoomService.leaveRoom(roomId, user.userId);
-      return NextResponse.json({ success: true, message: "已离开房间" });
-    }
-    case "close": {
-      // SECURITY: API层授权检查 - 验证房间所有权
-      const room = await WatchRoomService.getRoomForUser(roomId, user.userId);
-      if (room.hostId !== user.userId) {
-        return NextResponse.json(
-          { error: "只有房主可以关闭房间" },
-          { status: 403 }
-        );
+  try {
+    switch (action) {
+      case "join": {
+        const room = await WatchRoomService.joinRoom(roomId, user.userId);
+        return NextResponse.json({ success: true, data: room });
       }
-      await WatchRoomService.closeRoom(roomId, user.userId);
-      return NextResponse.json({ success: true, message: "房间已关闭" });
+      case "leave": {
+        await WatchRoomService.leaveRoom(roomId, user.userId);
+        return NextResponse.json({ success: true, message: "已离开房间" });
+      }
+      case "close": {
+        // SECURITY: API层授权检查 - 验证房间所有权
+        const room = await WatchRoomService.getRoomForUser(roomId, user.userId);
+        if (room.hostId !== user.userId) {
+          return NextResponse.json(
+            { error: "只有房主可以关闭房间" },
+            { status: 403 }
+          );
+        }
+        await WatchRoomService.closeRoom(roomId, user.userId);
+        return NextResponse.json({ success: true, message: "房间已关闭" });
+      }
+      default:
+        return NextResponse.json(
+          { error: "未知操作，支持: join, leave, close" },
+          { status: 400 },
+        );
     }
-    default:
-      return NextResponse.json(
-        { error: "未知操作，支持: join, leave, close" },
-        { status: 400 },
-      );
+  } catch (error) {
+    logger.error("房间操作失败", error);
+    return NextResponse.json({ error: "房间操作失败" }, { status: 500 });
   }
 });
 
@@ -65,15 +76,20 @@ export const DELETE = withApiHandler(async (req: NextRequest, ctx: RouteContext)
   const user = await requireUser(req);
   const { roomId } = await ctx.params;
 
-  // SECURITY: API层授权检查 - 验证房间所有权
-  const room = await WatchRoomService.getRoomForUser(roomId, user.userId);
-  if (room.hostId !== user.userId) {
-    return NextResponse.json(
-      { error: "只有房主可以关闭房间" },
-      { status: 403 }
-    );
-  }
+  try {
+    // SECURITY: API层授权检查 - 验证房间所有权
+    const room = await WatchRoomService.getRoomForUser(roomId, user.userId);
+    if (room.hostId !== user.userId) {
+      return NextResponse.json(
+        { error: "只有房主可以关闭房间" },
+        { status: 403 }
+      );
+    }
 
-  await WatchRoomService.closeRoom(roomId, user.userId);
-  return NextResponse.json({ success: true, message: "房间已关闭" });
+    await WatchRoomService.closeRoom(roomId, user.userId);
+    return NextResponse.json({ success: true, message: "房间已关闭" });
+  } catch (error) {
+    logger.error("关闭房间失败", error);
+    return NextResponse.json({ error: "关闭房间失败" }, { status: 500 });
+  }
 });

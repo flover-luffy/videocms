@@ -2,6 +2,7 @@
 
 import type { ReactNode } from "react";
 import { motion, type Variants } from "framer-motion";
+import { memo } from "react";
 
 interface Props {
   children: ReactNode[];
@@ -32,7 +33,7 @@ const itemVars: Variants = {
   },
 };
 
-export default function StaggeredList({ children, className }: Props) {
+function StaggeredList({ children, className }: Props) {
   return (
     <motion.div
       variants={containerVars}
@@ -49,3 +50,5 @@ export default function StaggeredList({ children, className }: Props) {
     </motion.div>
   );
 }
+
+export default memo(StaggeredList);

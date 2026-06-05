@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { withApiHandler } from "@/lib/api-handler";
 import { DanmakuService } from "@/services/danmaku.service";
 import { requireUser } from "@/lib/auth/require-auth";
+import { logger } from "@/lib/logger";
 
 /**
  * GET /api/danmaku?episodeId=xxx
@@ -26,9 +27,13 @@ export const GET = withApiHandler(async (req: NextRequest) => {
     );
   }
 
-  const items = await DanmakuService.getByEpisode(episodeId);
-
-  return NextResponse.json({ success: true, data: items });
+  try {
+    const items = await DanmakuService.getByEpisode(episodeId);
+    return NextResponse.json({ success: true, data: items });
+  } catch (error) {
+    logger.error("获取弹幕失败", error);
+    return NextResponse.json({ error: "获取弹幕失败" }, { status: 500 });
+  }
 });
 
 /**
@@ -49,15 +54,20 @@ export const POST = withApiHandler(async (req: NextRequest) => {
     );
   }
 
-  const danmaku = await DanmakuService.create({
-    episodeId,
-    text,
-    time,
-    color: typeof color === "string" ? color : undefined,
-    type: typeof type === "number" && [0, 1, 2].includes(type) ? (type as 0 | 1 | 2) : undefined,
-    fontSize: typeof fontSize === "number" ? fontSize : undefined,
-    userId: user.userId,
-  });
+  try {
+    const danmaku = await DanmakuService.create({
+      episodeId,
+      text,
+      time,
+      color: typeof color === "string" ? color : undefined,
+      type: typeof type === "number" && [0, 1, 2].includes(type) ? (type as 0 | 1 | 2) : undefined,
+      fontSize: typeof fontSize === "number" ? fontSize : undefined,
+      userId: user.userId,
+    });
 
-  return NextResponse.json({ success: true, data: danmaku }, { status: 201 });
+    return NextResponse.json({ success: true, data: danmaku }, { status: 201 });
+  } catch (error) {
+    logger.error("发送弹幕失败", error);
+    return NextResponse.json({ error: "发送弹幕失败" }, { status: 500 });
+  }
 });

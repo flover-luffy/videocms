@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import EmptyStatePanel from "@/components/layout/EmptyStatePanel";
 import { fetchWithCsrf } from "@/lib/fetch-client";
 
@@ -40,7 +40,7 @@ export default function ImportTab() {
     loadConfigs().catch(console.error);
   }, []);
 
-  const handleImport = async (e: React.FormEvent) => {
+  const handleImport = useCallback(async (e: React.FormEvent) => {
     e.preventDefault();
     if (!importForm.configId || !importForm.path) {
       return;
@@ -89,7 +89,7 @@ export default function ImportTab() {
     } finally {
       setImporting(false);
     }
-  };
+  }, [importForm]);
 
   return (
     <div className="space-y-6">

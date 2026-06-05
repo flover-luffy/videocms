@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import EmptyStatePanel from "@/components/layout/EmptyStatePanel";
 import { fetchWithCsrf } from "@/lib/fetch-client";
 
@@ -59,12 +59,12 @@ export default function ConfigTab() {
     [configs, editingConfigId],
   );
 
-  const pushMsg = (text: string, type: "success" | "error") => {
+  const pushMsg = useCallback((text: string, type: "success" | "error") => {
     setConfigMsg({ text, type });
     setTimeout(() => setConfigMsg({ text: "", type: "" }), 3200);
-  };
+  }, []);
 
-  const handleAddConfig = async (e: React.FormEvent) => {
+  const handleAddConfig = useCallback(async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newConfig.name || !newConfig.host || !newConfig.token) {
       pushMsg("请完整填写连接名称、地址和 Token。", "error");
@@ -96,9 +96,9 @@ export default function ConfigTab() {
     } finally {
       setAddingConfig(false);
     }
-  };
+  }, [newConfig, pushMsg]);
 
-  const handleDeleteConfig = async (id: number) => {
+  const handleDeleteConfig = useCallback(async (id: number) => {
     if (confirmDeleteId !== id) {
       setConfirmDeleteId(id);
       setTimeout(() => setConfirmDeleteId(null), 3000);
@@ -122,18 +122,18 @@ export default function ConfigTab() {
     } catch {
       pushMsg("网络请求失败。", "error");
     }
-  };
+  }, [confirmDeleteId, pushMsg]);
 
-  const handleStartEdit = (config: Config) => {
+  const handleStartEdit = useCallback((config: Config) => {
     setEditingConfigId(config.id);
     setEditConfig({
       name: config.name,
       host: config.host,
       token: "",
     });
-  };
+  }, []);
 
-  const handleSaveEdit = async (id: number) => {
+  const handleSaveEdit = useCallback(async (id: number) => {
     if (!editConfig.name || !editConfig.host || !editConfig.token) {
       pushMsg("编辑时需要重新填写名称、地址和新 Token。", "error");
       return;
@@ -163,7 +163,7 @@ export default function ConfigTab() {
     } finally {
       setSavingEdit(false);
     }
-  };
+  }, [editConfig, pushMsg]);
 
   const renderField = (
     id: string,

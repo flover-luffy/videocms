@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { ReactNode } from "react";
+import { ReactNode, memo } from "react";
 
 interface EmptyStatePanelProps {
   title: ReactNode;
@@ -11,7 +11,7 @@ interface EmptyStatePanelProps {
   className?: string;
 }
 
-export default function EmptyStatePanel({
+function EmptyStatePanel({
   title,
   description,
   actionHref,
@@ -45,3 +45,5 @@ export default function EmptyStatePanel({
     </div>
   );
 }
+
+export default memo(EmptyStatePanel);

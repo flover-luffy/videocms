@@ -25,12 +25,12 @@ export default function SearchPage() {
       try {
         const res = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
         if (!res.ok) {
-          throw new Error(`Search failed with status: ${res.status}`);
+          throw new Error(`搜索请求失败：服务器返回 ${res.status} 错误`);
         }
 
         const contentType = res.headers.get("content-type");
         if (!contentType || !contentType.includes("application/json")) {
-          throw new Error("API returned non-JSON response");
+          throw new Error("搜索服务返回了非 JSON 格式的响应，请稍后重试");
         }
 
         const data = await res.json();

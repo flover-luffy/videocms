@@ -1,6 +1,6 @@
 "use client";
 
-import { ReactNode } from "react";
+import { ReactNode, memo } from "react";
 import { motion } from "framer-motion";
 
 interface PageHeroProps {
@@ -14,7 +14,7 @@ interface PageHeroProps {
   className?: string;
 }
 
-export default function PageHero({
+function PageHero({
   eyebrow,
   title,
   description,
@@ -80,3 +80,5 @@ export default function PageHero({
     </motion.header>
   );
 }
+
+export default memo(PageHero);

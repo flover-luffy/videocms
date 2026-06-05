@@ -49,11 +49,10 @@ export default function LibraryPage() {
         const data = await res.json();
         setItems(data.items || []);
       } catch (err) {
-        const error = err as Error;
-        if (controller.signal.aborted || error.name === "AbortError") {
+        if (controller.signal.aborted || (err instanceof Error && err.name === "AbortError")) {
           return;
         }
-        console.error(error);
+        console.error(err);
       } finally {
         setLoading(false);
       }

@@ -1,5 +1,6 @@
 "use client";
 
+import { memo } from "react";
 import FavoriteButton from "@/components/ui/FavoriteButton";
 
 interface TmdbMeta {
@@ -17,7 +18,7 @@ interface PlayMetaHeaderProps {
   tmdbMeta: TmdbMeta;
 }
 
-export default function PlayMetaHeader({
+function PlayMetaHeader({
   seriesId,
   seriesTitle,
   episodeNum,
@@ -129,3 +130,5 @@ export default function PlayMetaHeader({
     </header>
   );
 }
+
+export default memo(PlayMetaHeader);

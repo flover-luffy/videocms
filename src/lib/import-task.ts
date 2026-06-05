@@ -4,6 +4,7 @@ import type { ScannedItem } from "@/types";
 import { cleanSeriesTitle, normalizePath } from "./openlist/utils";
 import { getStorageProvider } from "./storage/factory";
 import { OpenListProvider } from "./storage/providers/openlist";
+import { AppError } from "./errors";
 
 /**
  * 核心导入任务执行函数
@@ -18,12 +19,12 @@ export async function runImportTask(
     where: { id: configId },
   });
   if (!config) {
-    throw new Error("OpenList 配置不存在");
+    throw AppError.notFound(`OpenList 配置不存在 (ID: ${configId})`);
   }
 
   // 验证路径安全性
   if (path.includes("..") || path.includes("//")) {
-    throw new Error("无效的路径格式");
+    throw AppError.badRequest(`路径格式无效：不允许包含 ".." 或 "//" (path: ${path})`);
   }
 
   // 清理和规范化标题
@@ -48,7 +49,9 @@ export async function runImportTask(
       `[ImportTask] 扫描失败 (configId=${configId}, path=${path}):`,
       err,
     );
-    throw new Error("扫描存储目录失败");
+    throw AppError.badGateway(
+      `扫描存储目录失败：${err instanceof Error ? err.message : String(err)} (path: ${path})`
+    );
   }
 
   if (scanned.length === 0) {

@@ -1,5 +1,6 @@
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
+import { AppError } from "./errors";
 
 const BLOCKED_HOSTNAMES = new Set(["localhost", "localhost.localdomain"]);
 
@@ -52,16 +53,16 @@ export async function assertAllowedOutboundUrl(rawUrl: string): Promise<URL> {
   try {
     parsed = new URL(rawUrl);
   } catch {
-    throw new Error("Invalid URL");
+    throw AppError.badRequest(`URL 格式无效：无法解析 "${rawUrl}"`);
   }
 
   if (parsed.username || parsed.password) {
-    throw new Error("URL credentials are not allowed");
+    throw AppError.badRequest("URL 不允许包含用户名或密码凭据");
   }
 
   const allowInsecureHttp = process.env.OPENLIST_ALLOW_INSECURE_HTTP === "true";
   if (parsed.protocol !== "https:" && !(allowInsecureHttp && parsed.protocol === "http:")) {
-    throw new Error("Only HTTPS OpenList hosts are allowed");
+    throw AppError.badRequest("仅允许使用 HTTPS 协议访问 OpenList 主机");
   }
 
   const hostname = parsed.hostname.toLowerCase();
@@ -70,19 +71,19 @@ export async function assertAllowedOutboundUrl(rawUrl: string): Promise<URL> {
     hostname.endsWith(".localhost") ||
     hostname.endsWith(".local")
   ) {
-    throw new Error("Private hostnames are not allowed");
+    throw AppError.badRequest(`不允许访问私有主机名：${hostname}`);
   }
 
   if (isIP(hostname)) {
     if (isBlockedIp(hostname)) {
-      throw new Error("Private IP ranges are not allowed");
+      throw AppError.badRequest(`不允许访问私有 IP 地址：${hostname}`);
     }
     return parsed;
   }
 
   const addresses = await lookup(hostname, { all: true, verbatim: false });
   if (addresses.length === 0 || addresses.some((entry) => isBlockedIp(entry.address))) {
-    throw new Error("Host resolves to a private or unsupported IP address");
+    throw AppError.badRequest(`主机 ${hostname} 解析到私有或不支持的 IP 地址`);
   }
 
   return parsed;

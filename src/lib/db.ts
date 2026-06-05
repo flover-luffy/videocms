@@ -14,7 +14,14 @@ const connectionString = process.env.DATABASE_URL;
  * 创建连接池配置
  * 优化数据库连接性能
  */
-function createPoolConfig() {
+function createPoolConfig(): {
+  min: number;
+  max: number;
+  idleTimeoutMillis: number;
+  connectionTimeoutMillis: number;
+  statement_timeout: number;
+  application_name: string;
+} {
   // 从环境变量读取连接池配置，使用合理的默认值
   const poolMinSize = parseInt(process.env.DATABASE_POOL_MIN || "5", 10);
   const poolMaxSize = parseInt(process.env.DATABASE_POOL_MAX || "20", 10);
@@ -38,7 +45,7 @@ function createPoolConfig() {
 }
 
 // 内部初始化函数
-function createPrismaClient() {
+function createPrismaClient(): PrismaClient {
   const poolConfig = createPoolConfig();
 
   // 创建连接池
@@ -83,7 +90,11 @@ export const prisma = new Proxy({} as PrismaClient, {
 /**
  * 获取连接池状态（用于监控）
  */
-export function getPoolStats() {
+export function getPoolStats(): {
+  totalCount: number;
+  idleCount: number;
+  waitingCount: number;
+} | null {
   if (!globalForPrisma.pool) return null;
   return {
     totalCount: globalForPrisma.pool.totalCount,

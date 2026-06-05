@@ -79,9 +79,10 @@ const DanmakuInput: React.FC<DanmakuInputProps> = ({
 
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        throw new Error(
-          (data as { error?: string }).error || "发送失败",
-        );
+        const errorMessage = typeof data === "object" && data !== null && "error" in data && typeof data.error === "string"
+          ? data.error
+          : "发送失败";
+        throw new Error(errorMessage);
       }
 
       const result = await res.json();

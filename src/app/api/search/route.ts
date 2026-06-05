@@ -5,7 +5,7 @@ import { SearchSchema } from "@/lib/validation";
 import { createRateLimiter, RATE_LIMITS } from "@/lib/rate-limit";
 import { API_TIMEOUT_CONFIG } from "@/config";
 import { searchCache } from "@/lib/cache";
-import crypto from "crypto";
+import { createHash } from "crypto";
 
 const rateLimiter = createRateLimiter(RATE_LIMITS.search);
 
@@ -32,8 +32,7 @@ function generateSearchCacheKey(
     userId || "anon",
   ].join(":");
   
-  const hash = crypto
-    .createHash("sha256")
+  const hash = createHash("sha256")
     .update(keyMaterial)
     .digest("hex")
     .substring(0, 16);

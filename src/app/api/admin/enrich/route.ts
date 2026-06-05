@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { searchTmdbMetadata, fetchTmdbById } from "@/lib/tmdb/client";
 import { withApiHandler } from "@/lib/api-handler";
 import { requireAdmin } from "@/lib/auth/require-auth";
+import { logger } from "@/lib/logger";
 
 /**
  * 手动强制刷新/补全某部影视的 TMDB 元数据
@@ -28,70 +29,83 @@ export const POST = withApiHandler(async (request: NextRequest) => {
     );
   }
 
-  const series = await prisma.series.findUnique({
-    where: { id: seriesId },
-  });
+  try {
+    const series = await prisma.series.findUnique({
+      where: { id: seriesId },
+    });
 
-  if (!series) {
-    return NextResponse.json({ error: "找不到指定的系列" }, { status: 404 });
-  }
+    if (!series) {
+      return NextResponse.json({ error: "找不到指定的系列" }, { status: 404 });
+    }
 
-  // 判断是手动校正模式还是自动搜索模式
-  const manualTmdbId = body?.tmdbId ? parseInt(String(body.tmdbId), 10) : null;
-  const manualType: "movie" | "tv" | null =
-    body?.type === "movie" || body?.type === "tv" ? body.type : null;
-  const isManualMatch =
-    manualTmdbId !== null && !isNaN(manualTmdbId) && manualType !== null;
+    // 判断是手动校正模式还是自动搜索模式
+    const manualTmdbId = body?.tmdbId ? parseInt(String(body.tmdbId), 10) : null;
+    const manualType: "movie" | "tv" | null =
+      body?.type === "movie" || body?.type === "tv" ? body.type : null;
+    const isManualMatch =
+      manualTmdbId !== null && !isNaN(manualTmdbId) && manualType !== null;
 
-  let details;
-  if (isManualMatch) {
-    console.info(
-      `[Admin Enrich] 手动校正模式: seriesId=${seriesId}, tmdbId=${manualTmdbId}, type=${manualType}`,
-    );
-    details = await fetchTmdbById(manualTmdbId, manualType);
-  } else {
-    console.info(`[Admin Enrich] 自动搜索模式: ${series.title}`);
-    details = await searchTmdbMetadata(series.title);
-  }
+    let details;
+    try {
+      if (isManualMatch) {
+        console.info(
+          `[Admin Enrich] 手动校正模式: seriesId=${seriesId}, tmdbId=${manualTmdbId}, type=${manualType}`,
+        );
+        details = await fetchTmdbById(manualTmdbId, manualType);
+      } else {
+        console.info(`[Admin Enrich] 自动搜索模式: ${series.title}`);
+        details = await searchTmdbMetadata(series.title);
+      }
+    } catch (error) {
+      logger.error("TMDB 元数据获取失败", error);
+      return NextResponse.json(
+        { error: "TMDB 元数据获取失败" },
+        { status: 502 },
+      );
+    }
 
-  if (!details) {
-    return NextResponse.json(
-      { error: "在 TMDB 中未搜到匹配结果" },
-      { status: 404 },
-    );
-  }
+    if (!details) {
+      return NextResponse.json(
+        { error: "在 TMDB 中未搜到匹配结果" },
+        { status: 404 },
+      );
+    }
 
-  // 更新数据库
-  const updated = await prisma.series.update({
-    where: { id: series.id },
-    data: {
-      tmdbId: details.tmdbId,
-      title: isManualMatch ? (details.title as string) : series.title,
-      type: details.type,
-      overview: details.overview,
-      posterUrl: details.posterUrl || series.posterUrl,
-      backdropUrl: details.backdropUrl || series.backdropUrl,
-      year: details.year,
-      voteAverage: details.voteAverage,
-      genres: details.genres,
-      director: details.director,
-      cast: details.cast,
-      tmdbData: details.tmdbData,
+    // 更新数据库
+    const updated = await prisma.series.update({
+      where: { id: series.id },
+      data: {
+        tmdbId: details.tmdbId,
+        title: isManualMatch ? (details.title as string) : series.title,
+        type: details.type,
+        overview: details.overview,
+        posterUrl: details.posterUrl || series.posterUrl,
+        backdropUrl: details.backdropUrl || series.backdropUrl,
+        year: details.year,
+        voteAverage: details.voteAverage,
+        genres: details.genres,
+        director: details.director,
+        cast: details.cast,
+        tmdbData: details.tmdbData,
+        manualMatched: isManualMatch,
+      } as Record<string, unknown>,
+      select: {
+        id: true,
+        title: true,
+        type: true,
+        posterUrl: true,
+        voteAverage: true,
+        year: true,
+      },
+    });
+
+    return NextResponse.json({
+      success: true,
+      updated,
       manualMatched: isManualMatch,
-    } as Record<string, unknown>,
-    select: {
-      id: true,
-      title: true,
-      type: true,
-      posterUrl: true,
-      voteAverage: true,
-      year: true,
-    },
-  });
-
-  return NextResponse.json({
-    success: true,
-    updated,
-    manualMatched: isManualMatch,
-  });
+    });
+  } catch (error) {
+    logger.error("元数据刷新失败", error);
+    return NextResponse.json({ error: "元数据刷新失败" }, { status: 500 });
+  }
 });

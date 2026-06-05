@@ -16,7 +16,7 @@ interface HealthCheck {
  * 健康检查端点
  * GET /api/health
  */
-export async function GET() {
+export async function GET(): Promise<NextResponse<HealthCheck>> {
   const checks: HealthCheck["checks"] = {
     database: { status: "down" },
     memory: { status: "ok", usage: 0, limit: 0 },

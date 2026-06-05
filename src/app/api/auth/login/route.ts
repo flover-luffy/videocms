@@ -8,6 +8,7 @@ import { setAuthCookies } from "@/lib/auth/cookies";
 import { AuditLogger } from "@/lib/audit-logger";
 import { cacheManager } from "@/lib/cache";
 import { getClientIp } from "@/lib/server-utils";
+import { AppError } from "@/lib/errors";
 
 const loginAttemptCache = cacheManager.getCache<{
   count: number;
@@ -42,7 +43,9 @@ async function trackLoginAttempt(
   );
 
   if (attempts >= maxAttempts) {
-    throw new Error("Too many login attempts");
+    throw AppError.tooManyRequests(
+      `登录尝试次数过多，请在 15 分钟后重试（已尝试 ${attempts} 次）`
+    );
   }
 }
 
@@ -93,48 +96,54 @@ export const POST = withApiHandler(async (request: NextRequest) => {
     );
   }
 
-  const user = await prisma.user.findUnique({ where: { email } });
-  const valid = await bcrypt.compare(
-    password,
-    user?.passwordHash ?? DUMMY_PASSWORD_HASH,
-  );
-  if (!user) {
-    try {
-      await trackLoginAttempts(rateLimitKeys, false);
-    } catch (err) {
-      console.warn("[Login] Unable to record failed login attempt", err);
-    }
-    await AuditLogger.logLoginAttempt(email, ip, false, "user_not_found");
-    return NextResponse.json({ error: "邮箱或密码错误" }, { status: 401 });
-  }
-
-  if (!valid) {
-    try {
-      await trackLoginAttempts(rateLimitKeys, false);
-    } catch (err) {
-      console.warn("[Login] Unable to record failed login attempt", err);
-    }
-    await AuditLogger.logLoginAttempt(email, ip, false, "invalid_password");
-    return NextResponse.json({ error: "邮箱或密码错误" }, { status: 401 });
-  }
-
   try {
-    await trackLoginAttempts(rateLimitKeys, true);
-  } catch (err) {
-    console.warn("[Login] Unable to clear login counters", err);
+    const user = await prisma.user.findUnique({ where: { email } });
+    const valid = await bcrypt.compare(
+      password,
+      user?.passwordHash ?? DUMMY_PASSWORD_HASH,
+    );
+    if (!user) {
+      try {
+        await trackLoginAttempts(rateLimitKeys, false);
+      } catch (err) {
+        console.warn("[Login] Unable to record failed login attempt", err);
+      }
+      await AuditLogger.logLoginAttempt(email, ip, false, "user_not_found");
+      return NextResponse.json({ error: "邮箱或密码错误" }, { status: 401 });
+    }
+
+    if (!valid) {
+      try {
+        await trackLoginAttempts(rateLimitKeys, false);
+      } catch (err) {
+        console.warn("[Login] Unable to record failed login attempt", err);
+      }
+      await AuditLogger.logLoginAttempt(email, ip, false, "invalid_password");
+      return NextResponse.json({ error: "邮箱或密码错误" }, { status: 401 });
+    }
+
+    try {
+      await trackLoginAttempts(rateLimitKeys, true);
+    } catch (err) {
+      console.warn("[Login] Unable to clear login counters", err);
+    }
+    await AuditLogger.logLoginAttempt(email, ip, true);
+
+    const tokenPayload = { userId: user.id, email: user.email, role: user.role };
+    const [accessToken, refreshToken] = await Promise.all([
+      signAccessToken(tokenPayload),
+      signRefreshToken(tokenPayload),
+    ]);
+
+    const res = NextResponse.json({
+      user: { id: user.id, email: user.email, role: user.role },
+    });
+
+    setAuthCookies(res, { accessToken, refreshToken });
+    return res;
+  } catch (error) {
+    const { logger } = await import("@/lib/logger");
+    logger.error("登录失败", error);
+    return NextResponse.json({ error: "登录失败" }, { status: 500 });
   }
-  await AuditLogger.logLoginAttempt(email, ip, true);
-
-  const tokenPayload = { userId: user.id, email: user.email, role: user.role };
-  const [accessToken, refreshToken] = await Promise.all([
-    signAccessToken(tokenPayload),
-    signRefreshToken(tokenPayload),
-  ]);
-
-  const res = NextResponse.json({
-    user: { id: user.id, email: user.email, role: user.role },
-  });
-
-  setAuthCookies(res, { accessToken, refreshToken });
-  return res;
 });

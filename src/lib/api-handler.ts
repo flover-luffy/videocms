@@ -117,7 +117,7 @@ async function isRequestBodyWithinLimit(
 export function withApiHandler<T = unknown>(
   handler: ApiHandler<T>,
   options: ApiHandlerOptions = {},
-) {
+): ApiHandler<T> {
   const {
     timeout = API_TIMEOUT_CONFIG.DEFAULT,
     maxBodySize = DEFAULT_MAX_BODY_SIZE,
@@ -148,10 +148,12 @@ export function withApiHandler<T = unknown>(
         error instanceof Error ? error.message : "Internal Server Error";
       const stack = error instanceof Error ? error.stack : undefined;
       const cause =
-        error instanceof Error
-          ? (error as Error & { cause?: unknown }).cause
+        error instanceof Error && "cause" in error
+          ? (error as Error & { cause: unknown }).cause
           : undefined;
-      const code = (error as { code?: string })?.code;
+      const code = typeof error === "object" && error !== null && "code" in error
+        ? (error as { code: string }).code
+        : undefined;
 
       // 记录错误日志
       if (process.env.NODE_ENV === "development") {

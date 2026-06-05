@@ -2,6 +2,7 @@
  * 路径清理工具 - 深度防护
  * 防止路径遍历、规范化旁路、Unicode 编码攻击等
  */
+import { AppError } from "./errors";
 
 /**
  * 路径验证和清理的核心类
@@ -23,12 +24,12 @@ export class PathValidator {
    */
   static sanitizePath(path: string, basePath?: string): string {
     if (!path || typeof path !== "string") {
-      throw new Error("Invalid path: must be a non-empty string");
+      throw AppError.badRequest("路径参数无效：必须是非空字符串");
     }
 
     // ✅ 1. 长度检查
     if (path.length > this.MAX_PATH_LENGTH) {
-      throw new Error(`Path exceeds maximum length of ${this.MAX_PATH_LENGTH}`);
+      throw AppError.badRequest(`路径长度超限：最大允许 ${this.MAX_PATH_LENGTH} 字符，实际 ${path.length} 字符`);
     }
 
     // ✅ 2. 递归解码直到不再变化（防止 %25 = % 的双重编码攻击）
@@ -66,7 +67,7 @@ export class PathValidator {
     for (const part of parts) {
       // ❌ 拒绝当前目录或父目录引用
       if (part === "." || part === "..") {
-        throw new Error(`Path traversal detected: "${part}" in path`);
+        throw AppError.badRequest(`路径遍历攻击检测：路径中包含 "${part}"`);
       }
 
       if (part === "") {
@@ -75,23 +76,23 @@ export class PathValidator {
 
       // ❌ 拒绝包含空字符（null byte injection）
       if (part.includes("\x00")) {
-        throw new Error("Null byte detected in path");
+        throw AppError.badRequest("路径包含空字节（null byte）：可能存在注入攻击");
       }
 
       // ❌ 拒绝包含特殊 shell 字符
       const forbiddenChars = ["*", "?", "|", "<", ">", '"'];
       if (forbiddenChars.some((char) => part.includes(char))) {
-        throw new Error(`Forbidden character in path: ${part}`);
+        throw AppError.badRequest(`路径包含非法字符：${part}`);
       }
 
       // ❌ 拒绝 Windows ADS (Alternate Data Streams) 攻击
       if (part.includes(":") || part.startsWith("$")) {
-        throw new Error("Windows ADS attack detected");
+        throw AppError.badRequest(`Windows ADS 攻击检测：路径段 "${part}" 包含危险字符`);
       }
 
       // ❌ 白名单强制检查：拒绝包含不安全字符的路径段
       if (!this.SAFE_CHAR_PATTERN.test(part)) {
-        throw new Error(`Unsafe characters in path component: ${part}`);
+        throw AppError.badRequest(`路径段包含不安全字符：${part}`);
       }
 
       safeParts.push(part);
@@ -104,7 +105,9 @@ export class PathValidator {
     if (basePath) {
       const baseNormalized = basePath.endsWith("/") ? basePath : basePath + "/";
       if (!result.startsWith(baseNormalized)) {
-        throw new Error(`Path escapes base directory: ${result}`);
+        throw AppError.badRequest(
+          `路径安全检查失败：路径 "${result}" 试图逃逸基准目录 "${basePath}"`
+        );
       }
     }
 

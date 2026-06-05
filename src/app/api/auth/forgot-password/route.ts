@@ -1,5 +1,5 @@
 ﻿import { NextRequest, NextResponse } from "next/server";
-import crypto, { createHash } from "crypto";
+import { createHash } from "crypto";
 import { z } from "zod";
 import { withApiHandler } from "@/lib/api-handler";
 import { prisma } from "@/lib/db";
@@ -56,7 +56,8 @@ export const POST = withApiHandler(async (request: NextRequest) => {
     });
 
     if (user) {
-      const resetToken = crypto.randomBytes(32).toString("hex");
+      const { randomBytes } = await import("crypto");
+      const resetToken = randomBytes(32).toString("hex");
       const tokenHash = hashToken(resetToken);
       // SECURITY: 密码重置token 15分钟过期，减少攻击窗口
       const expiresAt = new Date(Date.now() + 15 * 60 * 1000);

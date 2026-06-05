@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { withApiHandler } from "@/lib/api-handler";
 import { verifyToken } from "@/lib/auth/jwt";
+import { logger } from "@/lib/logger";
 
 /**
  * 检查用户是否有权访问特定系列
@@ -46,44 +47,44 @@ export const GET = withApiHandler(async (request: NextRequest) => {
     if (!hasAccess) {
       return NextResponse.json({ error: "您无权访问此内容" }, { status: 403 });
     }
+
+    const [episode, allEpisodes] = await Promise.all([
+      prisma.episode.findUnique({
+        where: { id: episodeId },
+        include: {
+          series: true,
+        },
+      }),
+      prisma.episode.findMany({
+        where: { seriesId: seriesId },
+        orderBy: [{ seasonNum: "asc" }, { episodeNum: "asc" }],
+        select: {
+          id: true,
+          episodeNum: true,
+          seasonNum: true,
+          title: true,
+          // 显式排除 fileSize (BigInt)，因为它无法被 JSON.stringify 自动序列化
+        },
+      }),
+    ]);
+
+    if (!episode) {
+      return NextResponse.json({ error: "集数不存在" }, { status: 404 });
+    }
+
+    // 处理 episode 对象中的 BigInt 字段 (如果有)
+    const safeEpisode = JSON.parse(
+      JSON.stringify(episode, (key, value) =>
+        typeof value === "bigint" ? value.toString() : value,
+      ),
+    );
+
+    return NextResponse.json({
+      episode: safeEpisode,
+      allEpisodes,
+    });
   } catch (error) {
-    console.error("[PlayPageData] 认证失败:", error);
-    return NextResponse.json({ error: "认证失败" }, { status: 401 });
+    logger.error("获取播放页面数据失败", error);
+    return NextResponse.json({ error: "获取播放页面数据失败" }, { status: 500 });
   }
-
-  const [episode, allEpisodes] = await Promise.all([
-    prisma.episode.findUnique({
-      where: { id: episodeId },
-      include: {
-        series: true,
-      },
-    }),
-    prisma.episode.findMany({
-      where: { seriesId: seriesId },
-      orderBy: [{ seasonNum: "asc" }, { episodeNum: "asc" }],
-      select: {
-        id: true,
-        episodeNum: true,
-        seasonNum: true,
-        title: true,
-        // 显式排除 fileSize (BigInt)，因为它无法被 JSON.stringify 自动序列化
-      },
-    }),
-  ]);
-
-  if (!episode) {
-    return NextResponse.json({ error: "集数不存在" }, { status: 404 });
-  }
-
-  // 处理 episode 对象中的 BigInt 字段 (如果有)
-  const safeEpisode = JSON.parse(
-    JSON.stringify(episode, (key, value) =>
-      typeof value === "bigint" ? value.toString() : value,
-    ),
-  );
-
-  return NextResponse.json({
-    episode: safeEpisode,
-    allEpisodes,
-  });
 });

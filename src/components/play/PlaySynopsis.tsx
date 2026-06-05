@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, memo } from "react";
 import { motion } from "framer-motion";
 
 interface PlaySynopsisProps {
@@ -11,7 +11,7 @@ interface PlaySynopsisProps {
 /** 长文本阈值（字符数），超过时启用"展开/收起"交互 */
 const LONG_TEXT_THRESHOLD = 180;
 
-export default function PlaySynopsis({ overview, tagline }: PlaySynopsisProps) {
+function PlaySynopsis({ overview, tagline }: PlaySynopsisProps) {
   const [isExpanded, setIsExpanded] = useState(false);
 
   const displayText = overview || "暂无这部内容的详细介绍。";
@@ -51,3 +51,5 @@ export default function PlaySynopsis({ overview, tagline }: PlaySynopsisProps) {
     </div>
   );
 }
+
+export default memo(PlaySynopsis);

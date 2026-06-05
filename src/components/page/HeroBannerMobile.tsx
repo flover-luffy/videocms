@@ -3,6 +3,7 @@
 import { motion, AnimatePresence, Variants } from "framer-motion";
 import Image from "next/image";
 import Link from "next/link";
+import { memo } from "react";
 
 export interface BannerItem {
   id: number;
@@ -27,7 +28,7 @@ interface HeroBannerMobileProps {
   swipeConfidenceThreshold: number;
 }
 
-export default function HeroBannerMobile({
+function HeroBannerMobile({
   items,
   page,
   direction,
@@ -179,9 +180,9 @@ export default function HeroBannerMobile({
 
       {/* Pagination - Sleek Progressive Dots */}
       <div className="pointer-events-auto absolute bottom-8 left-0 right-0 z-30 flex justify-center gap-2">
-        {items.map((_, i) => (
+        {items.map((item, i) => (
           <button
-            key={i}
+            key={item.id}
             type="button"
             onClick={() => {
               const newDirection = i > itemIndex ? 1 : -1;
@@ -202,3 +203,5 @@ export default function HeroBannerMobile({
     </div>
   );
 }
+
+export default memo(HeroBannerMobile);
